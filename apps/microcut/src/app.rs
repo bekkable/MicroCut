@@ -5,9 +5,10 @@ use std::sync::Arc;
 
 use eframe::egui::{self, Key, Modifiers};
 use microcut_engine::{RangeEnd, Session};
-use microcut_media::{FfmpegBackend, MediaBackend, MediaInfo};
+use microcut_media::{Encoders, FfmpegBackend, MediaBackend, MediaInfo};
 use microcut_time::{ClockStamp, FrameRate};
 
+use crate::export::{self, Choices, ExportDialog, Outcome};
 use crate::loader::ProbeJob;
 use crate::playback::{Playback, Step, stop_frame};
 use crate::preview::Preview;
@@ -31,6 +32,9 @@ const KEY_ZOOM: f64 = 0.5;
 const OPEN_SHORTCUT: egui::KeyboardShortcut =
     egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::O);
 
+const EXPORT_SHORTCUT: egui::KeyboardShortcut =
+    egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::E);
+
 /// What is open right now.
 enum Document {
     Empty,
@@ -49,7 +53,21 @@ pub struct MicroCutApp {
     transport: Transport,
     volume: Volume,
     document: Document,
+    exports: Exports,
     ctx: egui::Context,
+}
+
+/// Export state.
+#[derive(Default)]
+struct Exports {
+    /// The open export dialog.
+    dialog: Option<ExportDialog>,
+    /// Codec choices of the last dialog.
+    choices: Choices,
+    /// The encoders of the installed FFmpeg, asked once.
+    encoders: Option<Encoders>,
+    /// The file written last, shown in the status line.
+    done: Option<PathBuf>,
 }
 
 /// Playback state.
@@ -89,6 +107,7 @@ impl MicroCutApp {
             transport: Transport::default(),
             volume: Volume::default(),
             document: Document::Empty,
+            exports: Exports::default(),
             ctx: ctx.clone(),
         };
         if let Some(path) = initial {
@@ -99,6 +118,7 @@ impl MicroCutApp {
 
     fn open(&mut self, path: PathBuf) {
         self.transport = Transport::default();
+        self.exports.done = None;
         self.document = match &self.backend {
             Ok(backend) => {
                 Document::Probing(ProbeJob::start(Arc::clone(backend), path, self.ctx.clone()))
@@ -167,7 +187,56 @@ impl MicroCutApp {
         self.document = document;
     }
 
+    /// Opens the export dialog for the selected range (playback pauses).
+    fn open_export(&mut self) {
+        let (Ok(backend), Document::Loaded(session)) = (&self.backend, &self.document) else {
+            return;
+        };
+        self.transport.playing = None;
+        self.transport.resume = false;
+        let encoders = match &self.exports.encoders {
+            Some(encoders) => encoders.clone(),
+            None => match backend.encoders() {
+                Ok(encoders) => self.exports.encoders.insert(encoders).clone(),
+                Err(err) => {
+                    self.transport.message = Some(format!("cannot export: {err}"));
+                    return;
+                }
+            },
+        };
+        let media = Arc::clone(session.media());
+        match ExportDialog::new(media, session.range(), encoders, self.exports.choices) {
+            Ok(dialog) => self.exports.dialog = Some(dialog),
+            Err(message) => self.transport.message = Some(message),
+        }
+    }
+
+    /// Shows the export dialog while it is open.
+    fn export_dialog(&mut self, ctx: &egui::Context) {
+        let (Some(dialog), Ok(backend)) = (&mut self.exports.dialog, &self.backend) else {
+            return;
+        };
+        let outcome = dialog.show(ctx, backend);
+        self.exports.choices = dialog.choices();
+        match outcome {
+            Outcome::Open => {}
+            Outcome::Closed => self.exports.dialog = None,
+            Outcome::Exported(path) => {
+                self.exports.dialog = None;
+                self.exports.done = Some(path);
+            }
+        }
+    }
+
     fn handle_input(&mut self, ui: &mut egui::Ui) {
+        if self.exports.dialog.is_some() {
+            // The dialog has the keyboard; files dropped meanwhile are ignored.
+            return;
+        }
+        if ui.input_mut(|i| i.consume_shortcut(&EXPORT_SHORTCUT)) {
+            self.open_export();
+            return;
+        }
         let dropped = ui.input(|i| i.raw.dropped_files.first().map(|f| f.path().to_path_buf()));
         if let Some(path) = dropped {
             self.open(path);
@@ -300,6 +369,28 @@ impl MicroCutApp {
             if open.clicked() {
                 self.open_dialog();
             }
+            let loaded = matches!(self.document, Document::Loaded(_)) && self.backend.is_ok();
+            let export = ui
+                .add_enabled(loaded, egui::Button::new("Export…"))
+                .on_hover_text(format!(
+                    "Export the selected range ({})",
+                    ui.ctx().format_shortcut(&EXPORT_SHORTCUT)
+                ));
+            if export.clicked() {
+                export.surrender_focus();
+                self.open_export();
+            }
+            if let Some(path) = &self.exports.done {
+                ui.add_space(8.0);
+                ui.label(format!("Exported {}", display_name(path)));
+                let hint = path.display().to_string();
+                if quiet_button(ui, "Show in folder", &hint).clicked()
+                    && let Err(message) = export::show_in_folder(path)
+                {
+                    self.transport.message = Some(message);
+                }
+                ui.add_space(8.0);
+            }
             let summary = match &self.document {
                 Document::Loaded(session) => {
                     Some(media_summary(session.media(), session.audio_track()))
@@ -310,10 +401,11 @@ impl MicroCutApp {
             // Media facts on the right; the path takes the rest and is shortened if needed.
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if let Some(summary) = summary {
-                    ui.label(summary);
+                    ui.add(egui::Label::new(summary).truncate());
                 }
                 ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
-                    if let Some(path) = path {
+                    // A sliver of path would only show "…".
+                    if let Some(path) = path.filter(|_| ui.available_width() > 60.0) {
                         ui.add(egui::Label::new(path).truncate());
                     }
                 });
@@ -405,6 +497,8 @@ impl eframe::App for MicroCutApp {
             self.toggle_play();
             self.ctx.request_repaint();
         }
+        let ctx = self.ctx.clone();
+        self.export_dialog(&ctx);
     }
 }
 

@@ -7,11 +7,16 @@
 #![forbid(unsafe_code)]
 #![deny(missing_docs)]
 
+mod export;
 mod scale;
 mod session;
 mod tiles;
 mod view;
 
+pub use export::{
+    EXPORT_EXTENSION, clean_file_name, default_audio_track, default_file_name, estimate_bytes,
+    free_file_name,
+};
 pub use scale::{Mark, frame_marks, snap_boundary, time_marks};
 pub use session::{FrameRange, RangeEnd, Session, Side};
 pub use tiles::{Tile, tiles};

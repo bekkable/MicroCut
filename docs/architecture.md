@@ -17,13 +17,13 @@ Nothing below L5 depends on egui/eframe/winit/rfd/cpal, so the engine and media 
 
 ```
 ┌──────────────────────────────────────────────┐
-│ [Open…] path                     media facts │
+│ [Open…] [Export…] path           media facts │
 ├──────────────────────────────────────────────┤
 │                                              │
 │            preview (frame at cursor)         │
 │                                              │
 ├──────────────────────────────────────────────┤
-│ ▶  00:01:05.12  range …   [Export]   🔈◢ 80 % │
+│ ▶ 00:01:05 [Set start][Set end] …  [0][1] 🔈◢ │
 ├──────────────────────────────────────────────┤
 │◀frame scale ····|····[=====range=====]····  ▶│  ← arrows: range end out of view
 │ ▮▮▮▮▮▮▮▮▮▮▮ video strip (thumbnails) ▮▮▮▮▮▮▮ │  ← wheel zooms, drag scrolls
@@ -40,7 +40,10 @@ Nothing below L5 depends on egui/eframe/winit/rfd/cpal, so the engine and media 
 - **Thumbnail tiles** span 1, 2, 3, 4, 6, 8, 12, … frames and show their first frame, so the frames shown do not
   change while scrolling and recur at neighbouring zoom levels (cached thumbnails stay useful). A tile is at most
   1.5 thumbnails wide; thumbnails are decoded 1.5× larger and cropped to fill it.
-- **Export** writes `<stem>_hh-mm-ss-to-hh-mm-ss.mp4` next to the original (see `ROADMAP.md` M5.2).
+- **Export** (`apps/microcut/src/export.rs`) is a modal dialog: codecs and quality (only encoders the installed
+  FFmpeg has), audio track, an estimate of the size, the file name (default `<stem>_hh-mm-ss-to-hh-mm-ss.mp4` next to
+  the original, ` (2)` if taken). The name rules, the preselected track and the estimate live in
+  `crates/engine/src/export.rs`. While it runs, the dialog shows progress and can cancel; closing the app cancels too.
 
 ## 3. Threads
 

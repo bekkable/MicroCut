@@ -64,11 +64,12 @@ Each task has an id (`M<milestone>.<n>`); one task per commit.
   (H.264, H.265, AV1 — only encoders the installed FFmpeg has) and audio codec, bit rate and track (or none);
   progress via `-progress pipe:1`, cancellable; the output file is created exclusively (never overwrites) and
   removed again on failure or cancel
-- [ ] M5.3 Export dialog (Export… button): codecs, quality, audio track (a track titled "Music" is preselected,
-  else the first); frame count, duration and estimated size; file name `<stem>_hh-mm-ss-to-hh-mm-ss.mp4` next to
-  the original, editable, ` (2)` appended if taken; buttons Cancel / Encode
-- [ ] M5.4 Progress in the dialog (bar, frames, time left), cancel, errors; afterwards a message with "Show in
-  folder"
+- [x] M5.3 Export dialog (Export… button, Ctrl+E): codecs, quality, audio track (a track titled "Music" is
+  preselected, else the first; or none); frame count, duration and estimated size; file name
+  `<stem>_hh-mm-ss-to-hh-mm-ss.mp4` next to the original, editable, ` (2)` appended if taken; buttons Cancel /
+  Encode (Enter); codec choices are remembered for the next export
+- [x] M5.4 Progress in the dialog (bar, frames, time left), cancel, errors; afterwards "Exported <name>" with "Show
+  in folder" in the toolbar
 
 ## Later
 

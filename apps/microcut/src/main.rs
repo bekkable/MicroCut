@@ -6,6 +6,7 @@
 mod app;
 mod audio;
 mod crash;
+mod export;
 mod loader;
 mod playback;
 mod preview;

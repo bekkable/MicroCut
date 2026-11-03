@@ -1,11 +1,13 @@
 # MicroCut
 
 A minimal video trimmer in Rust: open a video, pick a start and an end on the timeline, click **Export**. The cut is
-written next to the original, re-encoded with a fixed encoder, named `<original>_hh-mm-ss-to-hh-mm-ss.mp4`.
+re-encoded and written next to the original as `<original>_hh-mm-ss-to-hh-mm-ss.mp4`; existing files are never
+overwritten.
 
-Status: **M4 — playback.** Open a file (dialog, drag & drop or `microcut <video>`), find your way on the timeline,
-select the range to keep and play it with sound; the preview always shows the exact frame at the cursor. Export comes
-next; see [`ROADMAP.md`](ROADMAP.md).
+Status: **M5 — export.** Open a file (dialog, drag & drop or `microcut <video>`), find your way on the timeline,
+select the range to keep, play it with sound and export it frame-exactly as MP4 (H.264, H.265 or AV1; AAC or Opus;
+one audio track of your choice); the preview always shows the exact frame at the cursor. See
+[`ROADMAP.md`](ROADMAP.md).
 
 | Input                                  | Action                                         |
 | -------------------------------------- | ---------------------------------------------- |
@@ -23,6 +25,7 @@ next; see [`ROADMAP.md`](ROADMAP.md).
 | Speaker / wedge / wheel (status line)  | Mute, set volume                               |
 | `[0] [1] …` left of the speaker        | Choose the audio track (videos with several)   |
 | Ctrl+O                                 | Open a video                                   |
+| Export…, Ctrl+E                        | Export the range (codecs, quality, audio track, file name) |
 
 ## Build and run
 
