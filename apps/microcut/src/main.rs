@@ -6,6 +6,7 @@
 mod app;
 mod crash;
 mod loader;
+mod preview;
 
 use std::path::PathBuf;
 use std::process::ExitCode;

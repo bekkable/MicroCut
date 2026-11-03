@@ -162,6 +162,20 @@ impl fmt::Display for ClockStamp {
     }
 }
 
+/// A non-negative time as decimal seconds with microseconds (`12.345678`, truncated), the form
+/// command-line tools such as ffmpeg expect. Negative times format as `0.000000`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DecimalSecs(pub Tick);
+
+impl fmt::Display for DecimalSecs {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let ticks = self.0.0.max(0);
+        let secs = ticks / TICKS_PER_SECOND;
+        let micros = (ticks % TICKS_PER_SECOND) / (TICKS_PER_SECOND / 1_000_000);
+        write!(f, "{secs}.{micros:06}")
+    }
+}
+
 /// Range label for an exported cut, `hh-mm-ss-to-hh-mm-ss`; the export is named
 /// `<stem>_<range label>.mp4`.
 pub fn range_label(start: Tick, end: Tick) -> String {
@@ -192,6 +206,18 @@ mod tests {
         assert_eq!(ClockStamp(t).to_string(), "01:02:05.042");
         assert_eq!(ClockStamp(Tick(-1)).to_string(), "00:00:00.000");
         assert_eq!(ClockStamp(Tick(i64::MAX)).to_string(), "10086:10:01.077");
+    }
+
+    #[test]
+    fn decimal_secs_round_trips_through_parse() {
+        for text in ["0.000000", "12.345678", "3600.000001"] {
+            let tick = Tick::parse_decimal_secs(text).unwrap();
+            assert_eq!(DecimalSecs(tick).to_string(), text);
+        }
+        assert_eq!(DecimalSecs(Tick(-5)).to_string(), "0.000000");
+        // 1/60 s truncates to whole microseconds.
+        let rate = FrameRate::new(60, 1).unwrap();
+        assert_eq!(DecimalSecs(rate.frame_to_tick(1)).to_string(), "0.016666");
     }
 
     #[test]

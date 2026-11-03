@@ -3,8 +3,9 @@
 A minimal video trimmer in Rust: open a video, pick a start and an end on the timeline, click **Export**. The cut is
 written next to the original, re-encoded with a fixed encoder, named `<original>_hh-mm-ss-to-hh-mm-ss.mp4`.
 
-Status: **M1 — open a video.** Open a file (dialog, drag & drop or `microcut <video>`) and see its duration, frame
-count, resolution, frame rate and audio. Preview and timeline come next; see [`ROADMAP.md`](ROADMAP.md).
+Status: **M2 — preview.** Open a file (dialog, drag & drop or `microcut <video>`), move through it frame by frame
+(slider, ←/→, Shift+←/→, Home/End) and see the exact frame in the preview. The zoomable timeline comes next; see
+[`ROADMAP.md`](ROADMAP.md).
 
 ## Build and run
 

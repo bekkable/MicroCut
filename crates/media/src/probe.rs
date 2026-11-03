@@ -82,7 +82,9 @@ pub(crate) fn parse_probe(json: &[u8], path: PathBuf) -> Result<MediaInfo, Media
         .find(|s| s.codec_type.as_deref() == Some("audio"))
         .map(parse_audio);
 
-    let duration = [&probe.format.duration, &video_stream.duration]
+    // The video stream's own length wins: the container length also covers longer audio, which
+    // would add frames that do not exist. Matroska has no stream duration, hence the fallback.
+    let duration = [&video_stream.duration, &probe.format.duration]
         .into_iter()
         .filter_map(|d| d.as_deref().and_then(Tick::parse_decimal_secs))
         .find(|d| *d > Tick::ZERO)
@@ -214,9 +216,10 @@ mod tests {
     fn parses_typical_phone_clip() {
         let info = parse(PHONE_CLIP).unwrap();
         assert_eq!(info.container, "mov,mp4,m4a,3gp,3g2,mj2");
+        // The video stream (10.01 s), not the longer container (10.026667 s, audio overhang).
         assert_eq!(
             info.duration,
-            Tick::parse_decimal_secs("10.026667").unwrap()
+            Tick::parse_decimal_secs("10.010000").unwrap()
         );
         assert_eq!(info.start, Tick::ZERO);
         assert_eq!(info.video.codec, "h264");

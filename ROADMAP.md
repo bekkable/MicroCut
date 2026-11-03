@@ -18,10 +18,11 @@ Each task has an id (`M<milestone>.<n>`); one task per commit.
 
 ## M2 — Preview
 
-- [ ] M2.1 Decode the frame at the cursor (`ffmpeg -ss … -frames:v 1 -f rawvideo -pix_fmt rgba pipe:1`), scaled to
-  the preview size, on a background thread
-- [ ] M2.2 Show it in the preview area (top), aspect-correct (honour `VideoInfo::rotation` and `MediaInfo::start`);
-  latest request wins while scrubbing
+- [x] M2.1 Decode the frame at the cursor (`ffmpeg -ss … -frames:v 1 -f rawvideo -pix_fmt rgba pipe:1`), scaled to
+  the preview size, on a background thread — frame-exact (tested in MP4 and Matroska), ~120–320 ms per 720p frame
+- [x] M2.2 Show it in the preview area (top), aspect-correct, rotation applied by ffmpeg; latest request wins while
+  scrubbing. Until M3 the cursor is moved by a temporary frame slider and ←/→ (frame), Shift+←/→ (second),
+  Home/End
 
 ## M3 — Timeline (bottom of the window)
 
@@ -29,7 +30,8 @@ Each task has an id (`M<milestone>.<n>`); one task per commit.
 - [ ] M3.2 Mouse-wheel zoom anchored at the pointer, from whole clip to single frames
 - [ ] M3.3 Time scale below the strip (adaptive tick spacing, `hh:mm:ss` labels)
 - [ ] M3.4 Frame scale above the strip with the selected range (start/end handles, draggable)
-- [ ] M3.5 Cursor: click/drag to select a frame; arrow keys step frames; preview follows
+- [ ] M3.5 Cursor: click/drag to select a frame; preview follows. Replaces the temporary slider from M2.2 (the arrow
+  key bindings stay)
 
 ## M4 — Playback
 

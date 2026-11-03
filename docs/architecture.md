@@ -40,4 +40,16 @@ The UI thread never waits on ffmpeg (`apps/microcut/src/loader.rs` is the patter
 channel, `request_repaint`). Every ffmpeg/ffprobe run has a time limit and capped output
 (`crates/media/src/process.rs`) and no console window on Windows. Decode, playback and export run on worker threads
 (under `catch_unwind`) and send results over channels; the UI requests a repaint when a result arrives. While scrubbing
-only the newest frame request is served.
+only the newest frame request is served: the preview worker (`apps/microcut/src/preview.rs`) reads a one-slot mailbox
+that each new request overwrites.
+
+## 4. Frame-exact seeking
+
+`MediaBackend::decode_frame` takes a frame index, not a time. The ffmpeg backend seeks with `-ss` before `-i` to half
+a frame *before* the frame's start (`crates/media/src/frame.rs`, `seek_target`): ffmpeg decodes from the previous
+keyframe and drops frames before the target, and container timestamps may be rounded (Matroska: 1 ms), so aiming at
+the exact start could skip the frame. `crates/media/tests/decode.rs` proves it with fixtures whose frames encode their
+own number in their brightness.
+
+The frame count comes from the video stream's duration when the container has one (the container duration also covers
+longer audio), else from the container duration.

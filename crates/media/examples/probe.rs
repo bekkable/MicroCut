@@ -1,9 +1,11 @@
-//! Prints what MicroCut reads from video files, without the UI.
+//! Prints what MicroCut reads from video files, without the UI, and times decoding the first,
+//! middle and last frame.
 //!
 //! `cargo run -p microcut-media --example probe -- <file>…`
 
 use std::path::Path;
 use std::process::ExitCode;
+use std::time::Instant;
 
 use microcut_media::{FfmpegBackend, MediaBackend};
 use microcut_time::ClockStamp;
@@ -45,6 +47,18 @@ fn main() -> ExitCode {
                         a.codec, a.sample_rate, a.channels
                     ),
                     None => println!("  audio     none"),
+                }
+                let last = info.frame_count().saturating_sub(1);
+                for frame in [0, last / 2, last] {
+                    let started = Instant::now();
+                    let result = backend.decode_frame(&info, frame, (960, 540));
+                    let ms = started.elapsed().as_millis();
+                    match result {
+                        Ok(f) => {
+                            println!("  frame {frame:>7} {}x{} in {ms} ms", f.width(), f.height())
+                        }
+                        Err(err) => println!("  frame {frame:>7} ERROR {err} ({ms} ms)"),
+                    }
                 }
             }
             Err(err) => {

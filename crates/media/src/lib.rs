@@ -9,6 +9,7 @@
 
 mod error;
 mod ffmpeg;
+mod frame;
 mod info;
 mod locate;
 mod probe;
@@ -18,6 +19,7 @@ use std::path::Path;
 
 pub use error::MediaError;
 pub use ffmpeg::FfmpegBackend;
+pub use frame::{MAX_FRAME_EDGE, VideoFrame, clamp_frame};
 pub use info::{AudioInfo, MediaInfo, VideoInfo};
 pub use locate::FFMPEG_DIR_ENV;
 
@@ -26,4 +28,13 @@ pub use locate::FFMPEG_DIR_ENV;
 pub trait MediaBackend: Send + Sync {
     /// Reads container and stream information of the video at `path`.
     fn probe(&self, path: &Path) -> Result<MediaInfo, MediaError>;
+
+    /// Decodes frame `frame` (clamped to the media) of `media`, scaled to fit in `max_size`
+    /// (width, height) with the display aspect ratio kept and rotation applied. Never upscales.
+    fn decode_frame(
+        &self,
+        media: &MediaInfo,
+        frame: i64,
+        max_size: (u32, u32),
+    ) -> Result<VideoFrame, MediaError>;
 }

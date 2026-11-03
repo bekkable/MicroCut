@@ -58,4 +58,22 @@ pub enum MediaError {
     /// Neither the container nor the video stream states a duration.
     #[error("the duration of the video is unknown")]
     UnknownDuration,
+
+    /// The decoder delivered no picture for this frame (e.g. past the end of the video stream).
+    #[error("no picture at frame {frame}")]
+    NoFrame {
+        /// The requested frame index.
+        frame: i64,
+    },
+
+    /// `ffmpeg` delivered a picture of the wrong size.
+    #[error("ffmpeg returned {got} bytes for a {width}×{height} picture")]
+    BadFrame {
+        /// Requested width.
+        width: u32,
+        /// Requested height.
+        height: u32,
+        /// Bytes received.
+        got: usize,
+    },
 }
