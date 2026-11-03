@@ -12,6 +12,7 @@ repository = "https://github.com/Najoko/MicroCut"
 
 [workspace.dependencies]
 # Internal crates
+microcut-engine = { path = "crates/engine" }
 microcut-media = { path = "crates/media" }
 microcut-time = { path = "crates/time" }
 

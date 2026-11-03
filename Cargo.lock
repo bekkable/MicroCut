@@ -1610,9 +1610,18 @@ name = "microcut"
 version = "0.1.0"
 dependencies = [
  "eframe",
+ "microcut-engine",
  "microcut-media",
  "microcut-time",
  "rfd",
+]
+
+[[package]]
+name = "microcut-engine"
+version = "0.1.0"
+dependencies = [
+ "microcut-media",
+ "microcut-time",
 ]
 
 [[package]]

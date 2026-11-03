@@ -1,0 +1,14 @@
+[package]
+name = "microcut-engine"
+description = "MicroCut session state: cursor, range and timeline view, independent of the UI"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+microcut-media.workspace = true
+microcut-time.workspace = true
+
+[lints]
+workspace = true

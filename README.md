@@ -3,9 +3,19 @@
 A minimal video trimmer in Rust: open a video, pick a start and an end on the timeline, click **Export**. The cut is
 written next to the original, re-encoded with a fixed encoder, named `<original>_hh-mm-ss-to-hh-mm-ss.mp4`.
 
-Status: **M2 — preview.** Open a file (dialog, drag & drop or `microcut <video>`), move through it frame by frame
-(slider, ←/→, Shift+←/→, Home/End) and see the exact frame in the preview. The zoomable timeline comes next; see
+Status: **M3 — timeline.** Open a file (dialog, drag & drop or `microcut <video>`), find your way on the timeline and
+select the range to keep; the preview always shows the exact frame at the cursor. Playback and export come next; see
 [`ROADMAP.md`](ROADMAP.md).
+
+| Input                                  | Action                                         |
+| -------------------------------------- | ---------------------------------------------- |
+| Mouse wheel / `+` `−`                  | Zoom the timeline (at the pointer / cursor)    |
+| Shift+wheel, horizontal wheel          | Scroll the timeline                            |
+| Click / drag on the timeline           | Move the cursor                                |
+| Drag a range handle (frame scale)      | Move the start or end of the range             |
+| Double-click the time scale            | Show the whole clip                            |
+| ←/→, Shift+←/→, Home/End               | One frame, one second, first/last frame        |
+| Ctrl+O                                 | Open a video                                   |
 
 ## Build and run
 

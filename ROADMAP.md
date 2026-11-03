@@ -26,11 +26,14 @@ Each task has an id (`M<milestone>.<n>`); one task per commit.
 
 ## M3 — Timeline (bottom of the window)
 
-- [ ] M3.1 Video strip with thumbnails, horizontal scrolling
-- [ ] M3.2 Mouse-wheel zoom anchored at the pointer, from whole clip to single frames
-- [ ] M3.3 Time scale below the strip (adaptive tick spacing, `hh:mm:ss` labels)
-- [ ] M3.4 Frame scale above the strip with the selected range (start/end handles, draggable)
-- [ ] M3.5 Cursor: click/drag to select a frame; preview follows. Replaces the temporary slider from M2.2 (the arrow
+- [x] M3.1 Video strip with thumbnails (two decoder threads, only visible tiles queued, LRU cache), horizontal
+  scrolling (Shift+wheel, horizontal wheel/touchpad, dragging past an edge, cursor keys scroll along)
+- [x] M3.2 Mouse-wheel zoom anchored at the pointer, from whole clip to single frames (120 px per frame); `+`/`−`
+  zoom around the cursor, double-click on the time scale shows the whole clip
+- [x] M3.3 Time scale below the strip (adaptive tick spacing, `hh:mm:ss` labels, `hh:mm:ss.mmm` below one second)
+- [x] M3.4 Frame scale above the strip with the selected range (start/end handles, draggable; the preview shows the
+  frame at the dragged handle); the whole clip is selected after opening
+- [x] M3.5 Cursor: click/drag to select a frame; preview follows. Replaces the temporary slider from M2.2 (the arrow
   key bindings stay)
 
 ## M4 — Playback

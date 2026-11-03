@@ -8,6 +8,7 @@ rust-version.workspace = true
 
 [dependencies]
 eframe.workspace = true
+microcut-engine.workspace = true
 microcut-media.workspace = true
 microcut-time.workspace = true
 rfd.workspace = true

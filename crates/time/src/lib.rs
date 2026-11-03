@@ -162,6 +162,20 @@ impl fmt::Display for ClockStamp {
     }
 }
 
+/// A non-negative time for display, formatted `hh:mm:ss` (fraction truncated).
+///
+/// Negative times format as `00:00:00`; hours grow beyond two digits if needed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HmsStamp(pub Tick);
+
+impl fmt::Display for HmsStamp {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let secs = self.0.whole_secs().max(0);
+        let (h, m, s) = (secs / 3600, (secs / 60) % 60, secs % 60);
+        write!(f, "{h:02}:{m:02}:{s:02}")
+    }
+}
+
 /// A non-negative time as decimal seconds with microseconds (`12.345678`, truncated), the form
 /// command-line tools such as ffmpeg expect. Negative times format as `0.000000`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -206,6 +220,13 @@ mod tests {
         assert_eq!(ClockStamp(t).to_string(), "01:02:05.042");
         assert_eq!(ClockStamp(Tick(-1)).to_string(), "00:00:00.000");
         assert_eq!(ClockStamp(Tick(i64::MAX)).to_string(), "10086:10:01.077");
+    }
+
+    #[test]
+    fn hms_stamp_truncates_fraction() {
+        let t = Tick::parse_decimal_secs("3725.999").unwrap();
+        assert_eq!(HmsStamp(t).to_string(), "01:02:05");
+        assert_eq!(HmsStamp(Tick(-1)).to_string(), "00:00:00");
     }
 
     #[test]

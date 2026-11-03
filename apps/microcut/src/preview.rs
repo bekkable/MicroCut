@@ -149,17 +149,9 @@ impl Preview {
     }
 
     fn upload(&mut self, ctx: &egui::Context, frame: &VideoFrame) {
-        let (Ok(w), Ok(h)) = (
-            usize::try_from(frame.width()),
-            usize::try_from(frame.height()),
-        ) else {
+        let Some(image) = color_image(frame) else {
             return;
         };
-        // `VideoFrame` guarantees this; checked again because `from_rgba_unmultiplied` asserts.
-        if w.checked_mul(h).and_then(|p| p.checked_mul(4)) != Some(frame.rgba().len()) {
-            return;
-        }
-        let image = egui::ColorImage::from_rgba_unmultiplied([w, h], frame.rgba());
         let options = egui::TextureOptions::LINEAR;
         match &mut self.texture {
             Some(texture) => texture.set(image, options),
@@ -211,8 +203,22 @@ fn worker(
     }
 }
 
+/// A decoded frame as an egui image; `None` if the buffer does not match the size.
+pub(crate) fn color_image(frame: &VideoFrame) -> Option<egui::ColorImage> {
+    let w = usize::try_from(frame.width()).ok()?;
+    let h = usize::try_from(frame.height()).ok()?;
+    // `VideoFrame` guarantees this; checked again because `from_rgba_unmultiplied` asserts.
+    if w.checked_mul(h).and_then(|p| p.checked_mul(4)) != Some(frame.rgba().len()) {
+        return None;
+    }
+    Some(egui::ColorImage::from_rgba_unmultiplied(
+        [w, h],
+        frame.rgba(),
+    ))
+}
+
 /// Points → whole physical pixels, clamped to `u32`.
-fn physical_pixels(points: f32, pixels_per_point: f32) -> u32 {
+pub(crate) fn physical_pixels(points: f32, pixels_per_point: f32) -> u32 {
     let px = (points * pixels_per_point).round();
     if px.is_finite() && px >= 1.0 {
         // In range after the clamp, so the cast is exact.

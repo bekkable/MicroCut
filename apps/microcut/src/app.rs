@@ -4,11 +4,14 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use eframe::egui;
-use microcut_media::{FfmpegBackend, MediaBackend, MediaInfo, clamp_frame};
+use microcut_engine::Session;
+use microcut_media::{FfmpegBackend, MediaBackend, MediaInfo};
 use microcut_time::{ClockStamp, FrameRate};
 
 use crate::loader::ProbeJob;
 use crate::preview::Preview;
+use crate::thumbs::Thumbnails;
+use crate::timeline::Timeline;
 
 /// File extensions offered in the open dialog. Anything ffmpeg reads can still be dropped.
 const VIDEO_EXTENSIONS: &[&str] = &[
@@ -16,31 +19,17 @@ const VIDEO_EXTENSIONS: &[&str] = &[
     "3gp", "ogv", "mxf",
 ];
 
+/// Frames-per-pixel factor of one + key press (− uses the inverse).
+const KEY_ZOOM: f64 = 0.5;
+
 const OPEN_SHORTCUT: egui::KeyboardShortcut =
     egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::O);
-
-/// An opened video and the cursor in it.
-struct Loaded {
-    info: Arc<MediaInfo>,
-    /// Frame index at the cursor; always within the video.
-    cursor: i64,
-}
-
-impl Loaded {
-    fn last_frame(&self) -> i64 {
-        clamp_frame(&self.info, i64::MAX)
-    }
-
-    fn move_cursor(&mut self, to: i64) {
-        self.cursor = clamp_frame(&self.info, to);
-    }
-}
 
 /// What is open right now.
 enum Document {
     Empty,
     Probing(ProbeJob),
-    Loaded(Loaded),
+    Loaded(Session),
     Failed { path: PathBuf, message: String },
 }
 
@@ -49,6 +38,8 @@ pub struct MicroCutApp {
     /// The media backend, or why it is unavailable (shown permanently).
     backend: Result<Arc<dyn MediaBackend>, String>,
     preview: Option<Preview>,
+    thumbs: Option<Thumbnails>,
+    timeline: Timeline,
     document: Document,
     ctx: egui::Context,
 }
@@ -63,9 +54,12 @@ impl MicroCutApp {
             .as_ref()
             .ok()
             .map(|b| Preview::new(Arc::clone(b), ctx.clone()));
+        let thumbs = backend.as_ref().ok().map(|b| Thumbnails::new(b, ctx));
         let mut app = MicroCutApp {
             backend,
             preview,
+            thumbs,
+            timeline: Timeline::default(),
             document: Document::Empty,
             ctx: ctx.clone(),
         };
@@ -105,7 +99,7 @@ impl MicroCutApp {
         match &self.document {
             Document::Empty => None,
             Document::Probing(job) => Some(job.path()),
-            Document::Loaded(loaded) => Some(&loaded.info.path),
+            Document::Loaded(session) => Some(&session.media().path),
             Document::Failed { path, .. } => Some(path),
         }
     }
@@ -122,12 +116,13 @@ impl MicroCutApp {
                 if let Some(preview) = &mut self.preview {
                     preview.reset();
                 }
+                if let Some(thumbs) = &mut self.thumbs {
+                    thumbs.reset();
+                }
+                self.timeline = Timeline::default();
                 (
                     format!("MicroCut — {}", info.file_name()),
-                    Document::Loaded(Loaded {
-                        info: Arc::new(info),
-                        cursor: 0,
-                    }),
+                    Document::Loaded(Session::new(Arc::new(info))),
                 )
             }
             Err(message) => (
@@ -151,8 +146,8 @@ impl MicroCutApp {
         if ui.input_mut(|i| i.consume_shortcut(&OPEN_SHORTCUT)) {
             self.open_dialog();
         }
-        if let Document::Loaded(loaded) = &mut self.document {
-            cursor_keys(ui, loaded);
+        if let Document::Loaded(session) = &mut self.document {
+            cursor_keys(ui, session);
         }
     }
 
@@ -164,9 +159,22 @@ impl MicroCutApp {
             if open.clicked() {
                 self.open_dialog();
             }
-            if let Some(path) = self.current_path() {
-                ui.label(path.display().to_string());
-            }
+            let summary = match &self.document {
+                Document::Loaded(session) => Some(media_summary(session.media())),
+                _ => None,
+            };
+            let path = self.current_path().map(|p| p.display().to_string());
+            // Media facts on the right; the path takes the rest and is shortened if needed.
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if let Some(summary) = summary {
+                    ui.label(summary);
+                }
+                ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                    if let Some(path) = path {
+                        ui.add(egui::Label::new(path).truncate());
+                    }
+                });
+            });
         });
         if let Err(message) = &self.backend {
             ui.colored_label(ui.visuals().error_fg_color, message);
@@ -186,9 +194,9 @@ impl MicroCutApp {
                     ui.label(format!("Reading {}…", display_name(job.path())));
                 });
             }
-            Document::Loaded(loaded) => {
+            Document::Loaded(session) => {
                 if let Some(preview) = &mut self.preview {
-                    preview.show(ui, &loaded.info, loaded.cursor);
+                    preview.show(ui, session.media(), session.cursor());
                 }
             }
             Document::Failed { path, message } => {
@@ -205,9 +213,18 @@ impl eframe::App for MicroCutApp {
         self.poll_probe();
 
         egui::Panel::top("toolbar").show(ui, |ui| self.toolbar(ui));
-        if let Document::Loaded(loaded) = &mut self.document {
+        if let Document::Loaded(session) = &mut self.document {
             let preview = self.preview.as_ref();
-            egui::Panel::bottom("transport").show(ui, |ui| transport(ui, loaded, preview));
+            let (timeline, thumbs) = (&mut self.timeline, self.thumbs.as_mut());
+            egui::Panel::bottom("timeline")
+                .resizable(false)
+                .show(ui, |ui| {
+                    ui.add_space(4.0);
+                    status_line(ui, session, preview);
+                    ui.add_space(4.0);
+                    timeline.show(ui, session, thumbs);
+                    ui.add_space(4.0);
+                });
         }
         egui::CentralPanel::default()
             .frame(egui::Frame::central_panel(ui.style()).inner_margin(0.0))
@@ -218,25 +235,32 @@ impl eframe::App for MicroCutApp {
     }
 }
 
-/// Temporary cursor control until the timeline (M3): a frame slider and a status line.
-fn transport(ui: &mut egui::Ui, loaded: &mut Loaded, preview: Option<&Preview>) {
-    ui.add_space(4.0);
-    let last = loaded.last_frame();
-    ui.spacing_mut().slider_width = ui.available_width();
-    let mut cursor = loaded.cursor;
-    let slider = ui.add(egui::Slider::new(&mut cursor, 0..=last).show_value(false));
-    loaded.move_cursor(cursor);
-    // Keep keyboard focus free, so the arrow keys always step frames the same way.
-    if slider.has_focus() {
-        slider.surrender_focus();
-    }
-
+/// Cursor time and frame, the selected range and decoder state.
+fn status_line(ui: &mut egui::Ui, session: &Session, preview: Option<&Preview>) {
     ui.horizontal(|ui| {
-        let rate = loaded.info.video.frame_rate;
-        let time = ClockStamp(rate.frame_to_tick(loaded.cursor));
-        ui.monospace(format!("{time}   frame {} / {last}", loaded.cursor));
+        let rate = session.frame_rate();
+        let cursor = session.cursor();
+        let time = ClockStamp(rate.frame_to_tick(cursor));
+        ui.monospace(format!(
+            "{time}   frame {cursor} / {}",
+            session.last_frame()
+        ));
+        ui.separator();
+        let range = session.range();
+        let (start, end) = (range.start_time(rate), range.end_time(rate));
+        ui.monospace(format!(
+            "range {} – {} ({})",
+            ClockStamp(start),
+            ClockStamp(end),
+            ClockStamp(end.saturating_sub(start)),
+        ))
+        .on_hover_text(format!(
+            "frames {} – {} ({} frames)",
+            range.start(),
+            range.end(),
+            range.frame_count()
+        ));
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            ui.label(media_summary(&loaded.info));
             if let Some(preview) = preview {
                 if let Some(error) = preview.error() {
                     ui.colored_label(ui.visuals().error_fg_color, error);
@@ -246,29 +270,28 @@ fn transport(ui: &mut egui::Ui, loaded: &mut Loaded, preview: Option<&Preview>) 
             }
         });
     });
-    ui.add_space(2.0);
 }
 
-/// ←/→ one frame, Shift+←/→ one second, Home/End first/last frame. Only when no text field or
-/// other widget has the keyboard.
-fn cursor_keys(ui: &mut egui::Ui, loaded: &mut Loaded) {
+/// ←/→ one frame, Shift+←/→ one second, Home/End first/last frame; the timeline scrolls along.
+/// Only when no text field or other widget has the keyboard.
+fn cursor_keys(ui: &mut egui::Ui, session: &mut Session) {
     if ui.memory(|m| m.focused().is_some()) {
         return;
     }
-    let second = frames_per_second(loaded.info.video.frame_rate);
-    let last = loaded.last_frame();
+    let second = frames_per_second(session.frame_rate());
+    let (cursor, last) = (session.cursor(), session.last_frame());
     let target = ui.input_mut(|i| {
         let shift = egui::Modifiers::SHIFT;
         let none = egui::Modifiers::NONE;
         // Shift variants first: `consume_key(NONE, …)` would also match Shift+key.
         if i.consume_key(shift, egui::Key::ArrowLeft) {
-            Some(loaded.cursor.saturating_sub(second))
+            Some(cursor.saturating_sub(second))
         } else if i.consume_key(shift, egui::Key::ArrowRight) {
-            Some(loaded.cursor.saturating_add(second))
+            Some(cursor.saturating_add(second))
         } else if i.consume_key(none, egui::Key::ArrowLeft) {
-            Some(loaded.cursor.saturating_sub(1))
+            Some(cursor.saturating_sub(1))
         } else if i.consume_key(none, egui::Key::ArrowRight) {
-            Some(loaded.cursor.saturating_add(1))
+            Some(cursor.saturating_add(1))
         } else if i.consume_key(none, egui::Key::Home) {
             Some(0)
         } else if i.consume_key(none, egui::Key::End) {
@@ -278,7 +301,27 @@ fn cursor_keys(ui: &mut egui::Ui, loaded: &mut Loaded) {
         }
     });
     if let Some(target) = target {
-        loaded.move_cursor(target);
+        session.jump_cursor(target);
+    }
+
+    // + / − zoom the timeline around the cursor.
+    let zoom = ui.input_mut(|i| {
+        let none = egui::Modifiers::NONE;
+        let zoom_in =
+            i.consume_key(none, egui::Key::Plus) || i.consume_key(none, egui::Key::Equals);
+        let zoom_out = i.consume_key(none, egui::Key::Minus);
+        match (zoom_in, zoom_out) {
+            (true, false) => Some(KEY_ZOOM),
+            (false, true) => Some(1.0 / KEY_ZOOM),
+            _ => None,
+        }
+    });
+    if let Some(factor) = zoom {
+        let cursor = session.cursor() as f64 + 0.5;
+        let view = session.view_mut();
+        let anchor = view.x_of(cursor).clamp(0.0, view.width());
+        view.zoom_at(anchor, factor);
+        session.jump_cursor(session.cursor());
     }
 }
 

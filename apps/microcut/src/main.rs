@@ -7,6 +7,8 @@ mod app;
 mod crash;
 mod loader;
 mod preview;
+mod thumbs;
+mod timeline;
 
 use std::path::PathBuf;
 use std::process::ExitCode;
