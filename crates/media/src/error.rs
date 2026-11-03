@@ -72,6 +72,31 @@ pub enum MediaError {
         channels: u16,
     },
 
+    /// The export target exists already; MicroCut never overwrites files.
+    #[error("{} already exists. Choose another file name.", .0.display())]
+    OutputExists(PathBuf),
+
+    /// The export target could not be created.
+    #[error("could not create {}: {source}. Check that the folder exists and is writable.", .path.display())]
+    CreateOutput {
+        /// The file that was to be created.
+        path: PathBuf,
+        /// Underlying OS error.
+        #[source]
+        source: std::io::Error,
+    },
+
+    /// The export settings make no sense (empty range, odd bit rate).
+    #[error("invalid export settings: {0}")]
+    BadExport(&'static str),
+
+    /// `ffmpeg` failed while encoding.
+    #[error("the export failed: {message}")]
+    ExportFailed {
+        /// Last line of ffmpeg's error output.
+        message: String,
+    },
+
     /// The decoder delivered no picture for this frame (e.g. past the end of the video stream).
     #[error("no picture at frame {frame}")]
     NoFrame {

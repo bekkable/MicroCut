@@ -1,17 +1,21 @@
 //! [`MediaBackend`] implementation that runs `ffmpeg`/`ffprobe` as separate processes.
 
-use std::ffi::OsStr;
+use std::ffi::{OsStr, OsString};
+use std::fs;
+use std::io;
 use std::path::{self, Path, PathBuf};
 use std::time::Duration;
 
 use microcut_time::DecimalSecs;
 
+use crate::export::ProgressParser;
 use crate::frame::{self, fit_within, rgba_len};
 use crate::locate::{find_tool, search_dirs};
 use crate::process::{self, Limits, Streaming};
 use crate::stream::{self, FfmpegAudioStream, FfmpegVideoStream};
 use crate::{
-    AudioFormat, AudioStream, MediaBackend, MediaError, MediaInfo, VideoFrame, VideoStream, probe,
+    AudioFormat, AudioStream, Encoders, ExportEnd, ExportJob, MediaBackend, MediaError, MediaInfo,
+    VideoCodec, VideoFrame, VideoStream, probe,
 };
 
 const PROBE_LIMITS: Limits = Limits {
@@ -252,6 +256,199 @@ impl MediaBackend for FfmpegBackend {
             pending_error: None,
         }))
     }
+
+    fn encoders(&self) -> Result<Encoders, MediaError> {
+        let limits = Limits {
+            timeout: Duration::from_secs(15),
+            max_stdout: 1024 * 1024,
+            max_stderr: 64 * 1024,
+        };
+        let args = ["-hide_banner", "-v", "error", "-encoders"];
+        let output = process::run("ffmpeg", &self.ffmpeg, args, &limits)?;
+        if !output.status.success() {
+            return Err(MediaError::ToolFailed {
+                tool: "ffmpeg",
+                message: process::last_line(&output.stderr),
+            });
+        }
+        Ok(Encoders::parse(&String::from_utf8_lossy(&output.stdout)))
+    }
+
+    fn export(
+        &self,
+        media: &MediaInfo,
+        job: &ExportJob,
+        progress: &mut dyn FnMut(i64) -> bool,
+    ) -> Result<ExportEnd, MediaError> {
+        let args = export_args(media, job)?;
+        let output = path::absolute(&job.output).map_err(|source| MediaError::CreateOutput {
+            path: job.output.clone(),
+            source,
+        })?;
+        // Claim the name first: creating the file exclusively is what guarantees that no file is
+        // ever overwritten, even one that appeared after the dialog checked the name.
+        match fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&output)
+        {
+            Ok(_) => {}
+            Err(err) if err.kind() == io::ErrorKind::AlreadyExists => {
+                return Err(MediaError::OutputExists(output));
+            }
+            Err(source) => {
+                return Err(MediaError::CreateOutput {
+                    path: output,
+                    source,
+                });
+            }
+        }
+        // `file:` keeps ffmpeg from reading a protocol out of the path; `-y` overwrites only the
+        // empty file just created.
+        let mut target = OsString::from("file:");
+        target.push(output.as_os_str());
+        let args = args
+            .iter()
+            .map(OsString::as_os_str)
+            .chain([OsStr::new("-y"), target.as_os_str()]);
+
+        let result = run_export(&self.ffmpeg, args, progress);
+        match result {
+            Ok(ExportEnd::Finished) => Ok(ExportEnd::Finished),
+            other => {
+                // Best effort: a partial file is worthless, but failing to remove it is no
+                // reason to hide the real error.
+                let _ = fs::remove_file(&output);
+                other
+            }
+        }
+    }
+}
+
+/// Runs the export ffmpeg and follows its progress output.
+fn run_export<'a>(
+    ffmpeg: &Path,
+    args: impl IntoIterator<Item = &'a OsStr>,
+    progress: &mut dyn FnMut(i64) -> bool,
+) -> Result<ExportEnd, MediaError> {
+    let mut process = Streaming::spawn("ffmpeg", ffmpeg, args, stream::MAX_STDERR)?;
+    let mut parser = ProgressParser::default();
+    let mut buf = [0; 4096];
+    loop {
+        let n = process.read(&mut buf)?;
+        if n == 0 {
+            break;
+        }
+        let frames = buf.get(..n).and_then(|bytes| parser.feed(bytes));
+        if let Some(frames) = frames
+            && !progress(frames)
+        {
+            // Dropping the process kills ffmpeg.
+            return Ok(ExportEnd::Cancelled);
+        }
+    }
+    let (status, stderr) = process.finish()?;
+    if status.success() {
+        Ok(ExportEnd::Finished)
+    } else {
+        Err(MediaError::ExportFailed {
+            message: process::last_line(&stderr),
+        })
+    }
+}
+
+/// Valid audio bit rates in kbit/s.
+const AUDIO_KBPS: std::ops::RangeInclusive<u32> = 8..=1024;
+
+/// Every ffmpeg argument of an export except the output.
+fn export_args(media: &MediaInfo, job: &ExportJob) -> Result<Vec<OsString>, MediaError> {
+    if job.count < 1 {
+        return Err(MediaError::BadExport("the range is empty"));
+    }
+    if let Some(audio) = &job.audio {
+        if audio.track >= media.audio.len() {
+            return Err(MediaError::NoAudioStream);
+        }
+        if !AUDIO_KBPS.contains(&audio.kbps) {
+            return Err(MediaError::BadExport("audio bit rate out of range"));
+        }
+    }
+    let rate = media.video.frame_rate;
+    let from = frame::clamp_frame(media, job.from);
+    let count = job
+        .count
+        .min(media.frame_count().saturating_sub(from))
+        .max(1);
+    let start = rate.frame_to_tick(from);
+    let duration = rate
+        .frame_to_tick(from.saturating_add(count))
+        .saturating_sub(start);
+
+    let mut args: Vec<OsString> = Vec::new();
+    let mut push = |items: &[&str]| args.extend(items.iter().map(OsString::from));
+    push(&["-v", "error", "-nostdin", "-nostats", "-progress", "pipe:1"]);
+    push(&["-stats_period", "0.25"]);
+    // Video from half a frame before the first frame (see `seek_target`), so that frame is the
+    // first one out; audio sample-exact from the frame's start, as a second input.
+    let video_seek = DecimalSecs(frame::seek_target(media, from)).to_string();
+    push(&["-ss", &video_seek, "-i"]);
+    args.push(media.path.clone().into_os_string());
+    if job.audio.is_some() {
+        let audio_seek = DecimalSecs(start).to_string();
+        args.extend(["-ss".into(), audio_seek.into(), "-i".into()]);
+        args.push(media.path.clone().into_os_string());
+    }
+    let mut push = |items: &[&str]| args.extend(items.iter().map(OsString::from));
+
+    push(&["-map", "0:V:0"]);
+    let codec = job.video;
+    let crf = codec.crf(job.quality).to_string();
+    // The video starts at time 0 like the audio; yuv420p (what every player decodes) needs even
+    // sizes, so an odd last row or column is cropped.
+    push(&[
+        "-vf",
+        "setpts=PTS-STARTPTS,crop=trunc(iw/2)*2:trunc(ih/2)*2",
+        "-fps_mode",
+        "passthrough",
+        "-c:v",
+        codec.encoder(),
+        "-crf",
+        &crf,
+        "-pix_fmt",
+        "yuv420p",
+    ]);
+    match codec {
+        VideoCodec::H264 => push(&["-preset", "medium"]),
+        VideoCodec::H265 => push(&[
+            "-preset",
+            "medium",
+            "-tag:v",
+            "hvc1",
+            "-x265-params",
+            "log-level=error",
+        ]),
+        VideoCodec::Av1 => push(&["-preset", "8"]),
+    }
+    if let Some(audio) = &job.audio {
+        let map = format!("1:a:{}", audio.track);
+        let kbps = format!("{}k", audio.kbps);
+        push(&["-map", &map, "-c:a", audio.codec.encoder(), "-b:a", &kbps]);
+    }
+    let frames = count.to_string();
+    let duration = DecimalSecs(duration).to_string();
+    push(&[
+        "-frames:v",
+        &frames,
+        "-t",
+        &duration,
+        "-map_chapters",
+        "-1",
+        "-movflags",
+        "+faststart",
+        "-f",
+        "mp4",
+    ]);
+    Ok(args)
 }
 
 /// Error from the last stderr line. ffmpeg tools prefix errors with the input path, which the UI

@@ -60,7 +60,7 @@ Each task has an id (`M<milestone>.<n>`); one task per commit.
 
 - [x] M5.1 Set start/end at the cursor (buttons "Set start"/"Set end" in the status line, `I`/`O` keys); a start
   after the end (an end before the start) drops the other end
-- [ ] M5.2 Backend export: frame-exact re-encode of a frame range into MP4 with a chosen video codec and quality
+- [x] M5.2 Backend export: frame-exact re-encode of a frame range into MP4 with a chosen video codec and quality
   (H.264, H.265, AV1 — only encoders the installed FFmpeg has) and audio codec, bit rate and track (or none);
   progress via `-progress pipe:1`, cancellable; the output file is created exclusively (never overwrites) and
   removed again on failure or cancel

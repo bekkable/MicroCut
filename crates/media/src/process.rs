@@ -148,6 +148,21 @@ impl Streaming {
         Ok(Fill::Full)
     }
 
+    /// Reads what is available (at least one byte, blocking until then); `0` at the end.
+    pub(crate) fn read(&mut self, buf: &mut [u8]) -> Result<usize, MediaError> {
+        let tool = self.tool;
+        let Some(stdout) = &mut self.stdout else {
+            return Ok(0);
+        };
+        loop {
+            match stdout.read(buf) {
+                Ok(n) => return Ok(n),
+                Err(err) if err.kind() == io::ErrorKind::Interrupted => {}
+                Err(source) => return Err(MediaError::Spawn { tool, source }),
+            }
+        }
+    }
+
     /// After the output ended: waits for the program to exit and returns its status and error
     /// output.
     pub(crate) fn finish(&mut self) -> Result<(ExitStatus, Vec<u8>), MediaError> {

@@ -8,6 +8,7 @@
 #![deny(missing_docs)]
 
 mod error;
+mod export;
 mod ffmpeg;
 mod frame;
 mod info;
@@ -19,6 +20,9 @@ mod stream;
 use std::path::Path;
 
 pub use error::MediaError;
+pub use export::{
+    AudioCodec, AudioExport, Encoders, ExportEnd, ExportJob, VideoCodec, VideoQuality,
+};
 pub use ffmpeg::FfmpegBackend;
 pub use frame::{MAX_FRAME_EDGE, VideoFrame, clamp_frame};
 pub use info::{AudioInfo, MediaInfo, VideoInfo};
@@ -61,6 +65,20 @@ pub trait MediaBackend: Send + Sync {
         count: i64,
         format: AudioFormat,
     ) -> Result<Box<dyn AudioStream>, MediaError>;
+
+    /// The export encoders the installed media library offers.
+    fn encoders(&self) -> Result<Encoders, MediaError>;
+
+    /// Encodes `job` (blocking until done). The output file is created first and must not exist;
+    /// it is removed again if the export fails or is cancelled. `progress` is called with the
+    /// number of frames written so far, a few times per second; returning `false` cancels.
+    /// Video frames are exact: the first frame of the output is frame `job.from`.
+    fn export(
+        &self,
+        media: &MediaInfo,
+        job: &ExportJob,
+        progress: &mut dyn FnMut(i64) -> bool,
+    ) -> Result<ExportEnd, MediaError>;
 }
 
 /// Consecutive decoded frames (see [`MediaBackend::video_stream`]). Dropping it stops decoding.

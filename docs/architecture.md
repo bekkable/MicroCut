@@ -74,5 +74,12 @@ Playback streams seek the same way and pass every decoded picture through unchan
 picture n of a stream is frame `from + n` — exact for constant-frame-rate video, which `crates/media/tests/stream.rs`
 checks in MP4 and Matroska. Variable-frame-rate video plays with pictures shown at the nominal rate.
 
+Export (`MediaBackend::export`, `crates/media/src/ffmpeg.rs`) re-encodes, so it can cut at any frame: the video input
+seeks like playback and is limited to the frame count (`-frames:v`); the audio track is opened as a second input of the
+same file, seeked sample-exactly to the first frame's start, and both are cut to the range's duration (`-t`). The
+output file is created exclusively before ffmpeg runs (`-y` then only overwrites that empty file), so an existing file
+is never replaced, and it is removed again on failure or cancel. Progress comes from `-progress pipe:1`.
+`crates/media/tests/export.rs` checks frame numbers, the audio track, every available codec, cancel and failure.
+
 The frame count comes from the video stream's duration when the container has one (the container duration also covers
 longer audio), else from the container duration.
