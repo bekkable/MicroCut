@@ -16,6 +16,7 @@ next; see [`ROADMAP.md`](ROADMAP.md).
 | Drag a range handle (frame scale)      | Move the start or end of the range (Shift: snap to the time scale) |
 | Click / drag an edge arrow (frame scale) | Bring a range end that is out of view to the edge of the view / take hold of it |
 | Double-click the time scale or scrollbar | Show the whole clip                          |
+| `I` / `O`, "Set start" / "Set end"     | Start / end the range at the cursor            |
 | ←/→ or A/D                             | One frame (keys pause playback)                |
 | ↑/↓ or W/S (or Shift+←/→), Page Up/Down | One second, ten seconds                       |
 | Home/End                               | First/last frame                               |

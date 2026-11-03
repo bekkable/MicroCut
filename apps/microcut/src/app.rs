@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use eframe::egui::{self, Key, Modifiers};
-use microcut_engine::Session;
+use microcut_engine::{RangeEnd, Session};
 use microcut_media::{FfmpegBackend, MediaBackend, MediaInfo};
 use microcut_time::{ClockStamp, FrameRate};
 
@@ -176,7 +176,10 @@ impl MicroCutApp {
             self.open_dialog();
         }
         let moved = match &mut self.document {
-            Document::Loaded(session) => cursor_keys(ui, session),
+            Document::Loaded(session) => {
+                mark_keys(ui, session);
+                cursor_keys(ui, session)
+            }
             _ => false,
         };
         if moved {
@@ -381,6 +384,12 @@ impl eframe::App for MicroCutApp {
         if let Some(track) = actions.track {
             self.select_audio_track(track);
         }
+        if let (Some(which), Document::Loaded(session)) = (actions.mark, &mut self.document) {
+            match which {
+                RangeEnd::Start => session.mark_start(),
+                RangeEnd::End => session.mark_end(),
+            }
+        }
         // After the timeline (which may move the cursor), before the preview is drawn.
         self.step_playback();
         let preview_clicked = egui::CentralPanel::default()
@@ -413,6 +422,8 @@ struct StatusActions {
     play: bool,
     /// This audio track was chosen.
     track: Option<usize>,
+    /// Set this end of the range to the cursor.
+    mark: Option<RangeEnd>,
 }
 
 /// Play/pause button, cursor time and frame, the selected range, playback and decoder state,
@@ -424,48 +435,74 @@ fn status_line(
     volume: &mut Volume,
 ) -> StatusActions {
     let mut actions = StatusActions::default();
+    // The right part first, so the left part (range, messages) is shortened when space is tight.
     ui.horizontal(|ui| {
-        actions.play = play_button(ui, status.playing).clicked();
-        let rate = session.frame_rate();
-        let cursor = session.cursor();
-        let time = ClockStamp(rate.frame_to_tick(cursor));
-        ui.monospace(format!(
-            "{time}   frame {cursor} / {}",
-            session.last_frame()
-        ));
-        ui.separator();
-        let range = session.range();
-        let (start, end) = (range.start_time(rate), range.end_time(rate));
-        ui.monospace(format!(
-            "range {} – {} ({})",
-            ClockStamp(start),
-            ClockStamp(end),
-            ClockStamp(end.saturating_sub(start)),
-        ))
-        .on_hover_text(format!(
-            "frames {} – {} ({} frames)",
-            range.start(),
-            range.end(),
-            range.frame_count()
-        ));
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             volume.ui(ui);
             ui.add_space(6.0);
             actions.track = tracks::buttons(ui, &session.media().audio, session.audio_track());
             ui.add_space(8.0);
-            if let Some(preview) = status.preview {
-                if let Some(error) = preview.error() {
-                    ui.colored_label(ui.visuals().error_fg_color, error);
-                } else if preview.is_busy() && !status.playing {
-                    ui.spinner();
+            let preview_error = status.preview.and_then(Preview::error);
+            if status.preview.is_some_and(Preview::is_busy)
+                && !status.playing
+                && preview_error.is_none()
+            {
+                ui.spinner();
+            }
+            ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                actions.play = play_button(ui, status.playing).clicked();
+                let rate = session.frame_rate();
+                let cursor = session.cursor();
+                let time = ClockStamp(rate.frame_to_tick(cursor));
+                ui.monospace(format!(
+                    "{time}   frame {cursor} / {}",
+                    session.last_frame()
+                ));
+                ui.separator();
+                if quiet_button(ui, "Set start", "Start the range at the cursor (I)").clicked() {
+                    actions.mark = Some(RangeEnd::Start);
                 }
-            }
-            if let Some(message) = status.message {
-                ui.add(egui::Label::new(egui::RichText::new(message).weak()).truncate());
-            }
-        });
+                if quiet_button(ui, "Set end", "End the range at the cursor, included (O)")
+                    .clicked()
+                {
+                    actions.mark = Some(RangeEnd::End);
+                }
+                let range = session.range();
+                let (start, end) = (range.start_time(rate), range.end_time(rate));
+                let text = format!(
+                    "range {} – {} ({})",
+                    ClockStamp(start),
+                    ClockStamp(end),
+                    ClockStamp(end.saturating_sub(start)),
+                );
+                ui.add(egui::Label::new(egui::RichText::new(text).monospace()).truncate())
+                    .on_hover_text(format!(
+                        "frames {} – {} ({} frames)",
+                        range.start(),
+                        range.end(),
+                        range.frame_count()
+                    ));
+                if let Some(error) = preview_error {
+                    let text = egui::RichText::new(error).color(ui.visuals().error_fg_color);
+                    ui.add(egui::Label::new(text).truncate());
+                }
+                if let Some(message) = status.message {
+                    ui.add(egui::Label::new(egui::RichText::new(message).weak()).truncate());
+                }
+            });
+        })
     });
     actions
+}
+
+/// A small button that gives the keyboard back right away, so Space and the navigation keys
+/// keep working after a click.
+fn quiet_button(ui: &mut egui::Ui, text: &str, hint: &str) -> egui::Response {
+    let response = ui.small_button(text).on_hover_text(hint);
+    if response.has_focus() || response.gained_focus() {
+        response.surrender_focus();
+    }
+    response
 }
 
 /// A button with a drawn play triangle or pause bars (the default fonts lack ⏸). It never takes
@@ -592,6 +629,20 @@ fn cursor_keys(ui: &mut egui::Ui, session: &mut Session) -> bool {
         session.jump_cursor(session.cursor());
     }
     jump.is_some()
+}
+
+/// `I` starts and `O` ends the range at the cursor (only when no widget has the keyboard).
+fn mark_keys(ui: &mut egui::Ui, session: &mut Session) {
+    if ui.memory(|m| m.focused().is_some()) {
+        return;
+    }
+    let (start, end) = ui.input_mut(|i| (i.consume_key(NONE, Key::I), i.consume_key(NONE, Key::O)));
+    if start {
+        session.mark_start();
+    }
+    if end {
+        session.mark_end();
+    }
 }
 
 /// Frames in one second, rounded (at least 1).

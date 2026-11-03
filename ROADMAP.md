@@ -58,11 +58,17 @@ Each task has an id (`M<milestone>.<n>`); one task per commit.
 
 ## M5 — Export
 
-- [ ] M5.1 Set start/end (buttons + `I`/`O` keys)
-- [ ] M5.2 Export with the fixed encoder (H.264 `libx264` CRF 18 `preset medium`, AAC 192 kb/s, `.mp4`) next to the
-  original as `<stem>_hh-mm-ss-to-hh-mm-ss.mp4`; never overwrite (append ` (2)`, …). Open question for the user:
-  with several audio tracks, export the selected one, all of them, or a mix?
-- [ ] M5.3 Progress bar (`-progress pipe:1`), cancel, error display
+- [x] M5.1 Set start/end at the cursor (buttons "Set start"/"Set end" in the status line, `I`/`O` keys); a start
+  after the end (an end before the start) drops the other end
+- [ ] M5.2 Backend export: frame-exact re-encode of a frame range into MP4 with a chosen video codec and quality
+  (H.264, H.265, AV1 — only encoders the installed FFmpeg has) and audio codec, bit rate and track (or none);
+  progress via `-progress pipe:1`, cancellable; the output file is created exclusively (never overwrites) and
+  removed again on failure or cancel
+- [ ] M5.3 Export dialog (Export… button): codecs, quality, audio track (a track titled "Music" is preselected,
+  else the first); frame count, duration and estimated size; file name `<stem>_hh-mm-ss-to-hh-mm-ss.mp4` next to
+  the original, editable, ` (2)` appended if taken; buttons Cancel / Encode
+- [ ] M5.4 Progress in the dialog (bar, frames, time left), cancel, errors; afterwards a message with "Show in
+  folder"
 
 ## Later
 

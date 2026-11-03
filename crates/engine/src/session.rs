@@ -154,6 +154,24 @@ impl Session {
         self.range.end
     }
 
+    /// Starts the range at the cursor (key `I`). If the cursor is after the end, the old end is
+    /// dropped and the range runs to the last frame.
+    pub fn mark_start(&mut self) {
+        if self.cursor > self.range.end {
+            self.range.end = self.range_limit();
+        }
+        self.set_range_start(self.cursor);
+    }
+
+    /// Ends the range at the cursor, which is included (key `O`). If the cursor is before the
+    /// start, the old start is dropped and the range begins at the first frame.
+    pub fn mark_end(&mut self) {
+        if self.cursor < self.range.start {
+            self.range.start = 0;
+        }
+        self.set_range_end(self.cursor);
+    }
+
     /// Range ends that are scrolled out of view, per side: `(left, right)`. On each side it is
     /// the end nearest to the view — the one worth bringing to the cursor (both ends left of
     /// the view: the end; both right: the start).
@@ -300,6 +318,34 @@ mod tests {
             s.range().start_time(s.frame_rate()),
             Tick(40 * 254_016_000_000 / 25)
         );
+    }
+
+    #[test]
+    fn marks_set_the_range_at_the_cursor() {
+        let mut s = session(10, 25); // frames 0..=249
+        let range = |s: &Session| (s.range().start(), s.range().end());
+        s.set_cursor(50);
+        s.mark_end();
+        assert_eq!(range(&s), (0, 50));
+        s.set_cursor(20);
+        s.mark_start();
+        assert_eq!(range(&s), (20, 50));
+        s.set_cursor(30);
+        s.mark_end();
+        assert_eq!(range(&s), (20, 30), "the cursor frame is included");
+
+        s.set_cursor(100);
+        s.mark_start();
+        assert_eq!(range(&s), (100, 249), "a start after the end drops the end");
+        s.set_cursor(60);
+        s.mark_end();
+        assert_eq!(
+            range(&s),
+            (0, 60),
+            "an end before the start drops the start"
+        );
+        s.mark_start();
+        assert_eq!(range(&s), (60, 60), "a single frame");
     }
 
     #[test]
