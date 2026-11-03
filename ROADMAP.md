@@ -38,6 +38,9 @@ Each task has an id (`M<milestone>.<n>`); one task per commit.
 - [x] M3.6 Feedback: dragging the strip or a scale moves the view (a click sets the cursor); arrows at the edges of
   the frame scale for range ends out of view — a click brings that end to the cursor; scrollbar below the time
   scale (thumb = visible part, draggable, click on the track centres the view there, wheel zooms)
+- [x] M3.7 Feedback: Shift while dragging a range handle snaps to the time scale's marks (seconds etc., by zoom);
+  edge arrows: click moves the nearest hidden range end to the edge of the view, drag takes hold of it;
+  double-click on the scrollbar zooms out to the whole clip
 
 ## M4 — Playback
 
@@ -48,6 +51,8 @@ Each task has an id (`M<milestone>.<n>`); one task per commit.
   (samples actually played); system clock without sound or after the sound ended
 - [x] M4.3 Feedback: navigation keys pause playback; ↑/↓ one second, Page Up/Down ten seconds; a click on the
   preview plays/pauses; small volume control (speaker = mute, wedge, wheel) on the right of the status line
+- [x] M4.4 Feedback: the volume percentage is drawn inside the wedge (no layout jumps); WASD work like the arrow
+  keys
 
 ## M5 — Export
 

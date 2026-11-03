@@ -52,17 +52,15 @@ pub struct Mark {
 /// Marks for the time scale: times since the start of the clip, labelled `hh:mm:ss`
 /// (`hh:mm:ss.mmm` below one second).
 pub fn time_marks(view: &View, rate: FrameRate, min_label_px: f64) -> Vec<Mark> {
-    let fps = f64::from(rate.num()) / f64::from(rate.den());
-    let px_per_ms = fps / view.frames_per_px() / 1000.0;
-    if !px_per_ms.is_finite() || px_per_ms <= 0.0 {
+    let Some(TimeUnit {
+        step_ms,
+        unit_ms,
+        every,
+    }) = time_unit(view, rate, min_label_px)
+    else {
         return Vec::new();
-    }
-    let (step_ms, divisions) = TIME_STEPS
-        .iter()
-        .copied()
-        .find(|&(ms, _)| ms as f64 * px_per_ms >= min_label_px)
-        .unwrap_or((86_400_000, 4));
-    let (unit_ms, every) = subdivide(step_ms, divisions, px_per_ms);
+    };
+    let fps = f64::from(rate.num()) / f64::from(rate.den());
 
     let ms_at = |pos: f64| pos / fps * 1000.0;
     let first = (ms_at(view.left()) / unit_ms as f64).floor().max(0.0) as i64;
@@ -91,6 +89,64 @@ pub fn time_marks(view: &View, rate: FrameRate, min_label_px: f64) -> Vec<Mark> 
             })
         })
         .collect()
+}
+
+/// Spacing of the time scale at a zoom level.
+struct TimeUnit {
+    /// Between labelled marks.
+    step_ms: i64,
+    /// Between drawn marks (labelled or not).
+    unit_ms: i64,
+    /// Drawn marks per labelled one.
+    every: i64,
+}
+
+fn time_unit(view: &View, rate: FrameRate, min_label_px: f64) -> Option<TimeUnit> {
+    let fps = f64::from(rate.num()) / f64::from(rate.den());
+    let px_per_ms = fps / view.frames_per_px() / 1000.0;
+    if !px_per_ms.is_finite() || px_per_ms <= 0.0 {
+        return None;
+    }
+    let (step_ms, divisions) = TIME_STEPS
+        .iter()
+        .copied()
+        .find(|&(ms, _)| ms as f64 * px_per_ms >= min_label_px)
+        .unwrap_or((86_400_000, 4));
+    let (unit_ms, every) = subdivide(step_ms, divisions, px_per_ms);
+    Some(TimeUnit {
+        step_ms,
+        unit_ms,
+        every,
+    })
+}
+
+/// The frame boundary nearest to boundary position `pos`, snapped to the marks of the time
+/// scale at this zoom (Shift while dragging a range handle). Unsnapped when the marks are
+/// closer than a frame.
+pub fn snap_boundary(view: &View, rate: FrameRate, min_label_px: f64, pos: f64) -> i64 {
+    let unsnapped = pos.round().clamp(0.0, view.end()) as i64;
+    let Some(TimeUnit { unit_ms, .. }) = time_unit(view, rate, min_label_px) else {
+        return unsnapped;
+    };
+    let (num, den) = (i128::from(rate.num()), i128::from(rate.den()));
+    let unit_ms = i128::from(unit_ms);
+    // Marks closer than one frame (unit_ms / 1000 < den / num): frames are the finer grid.
+    if unit_ms * num < 1000 * den {
+        return unsnapped;
+    }
+    let fps = f64::from(rate.num()) / f64::from(rate.den());
+    let ms = pos / fps * 1000.0;
+    let marks = (ms / unit_ms as f64).round();
+    if !marks.is_finite() {
+        return unsnapped;
+    }
+    // Mark time in ms → nearest frame boundary, exactly: frames = ms · num / (1000 · den).
+    let mark_ms = (marks as i128).saturating_mul(unit_ms);
+    let scaled = mark_ms.saturating_mul(num);
+    let divisor = 1000 * den;
+    let frame = (scaled + divisor / 2).div_euclid(divisor);
+    let end = view.end() as i128;
+    i64::try_from(frame.clamp(0, end)).unwrap_or(unsnapped)
 }
 
 /// Marks for the frame scale: frame numbers at the start of each labelled frame.
@@ -205,6 +261,40 @@ mod tests {
         // 58 min = 3480 s = 104 295.7 frames → px = frames / frames_per_px.
         let expected = 3480.0 * 30_000.0 / 1_001.0 / v.frames_per_px();
         assert!((last.x - expected).abs() < 1e-6);
+    }
+
+    #[test]
+    fn snapping_follows_the_time_marks() {
+        let rate = FrameRate::new(60, 1).unwrap();
+        // 60 s at 60 fps in 600 px: labels every 10 s, marks every 2 s.
+        let v = view(3600, 600.0);
+        assert_eq!(snap_boundary(&v, rate, 80.0, 125.0), 120);
+        // 185 frames = 3.08 s → nearest mark 4 s.
+        assert_eq!(snap_boundary(&v, rate, 80.0, 185.0), 240);
+        assert_eq!(snap_boundary(&v, rate, 80.0, 1e12), 3600);
+        assert_eq!(snap_boundary(&v, rate, 80.0, -50.0), 0);
+        assert_eq!(snap_boundary(&v, rate, 80.0, f64::NAN), 0);
+    }
+
+    #[test]
+    fn snapping_finds_the_nearest_frame_for_ntsc() {
+        let rate = FrameRate::new(30_000, 1_001).unwrap();
+        // 1 px per frame: labels every 5 s, marks every 1 s (29.97 px).
+        let v = view(10_000, 10_000.0);
+        // 1 s = 29.97 frames → boundary 30; 2 s = 59.94 → 60; 3 s = 89.91 → 90.
+        assert_eq!(snap_boundary(&v, rate, 80.0, 31.0), 30);
+        assert_eq!(snap_boundary(&v, rate, 80.0, 88.0), 90);
+        // 100 s = 2997.0 frames exactly.
+        assert_eq!(snap_boundary(&v, rate, 80.0, 2990.0), 2997);
+    }
+
+    #[test]
+    fn deep_zoom_snaps_to_frames() {
+        let mut v = view(6000, 1000.0);
+        let rate = FrameRate::new(60, 1).unwrap();
+        v.zoom_at(0.0, 1e-9); // marks every 5 ms, a frame is 16.7 ms
+        assert_eq!(snap_boundary(&v, rate, 80.0, 3.4), 3);
+        assert_eq!(snap_boundary(&v, rate, 80.0, 3.6), 4);
     }
 
     #[test]

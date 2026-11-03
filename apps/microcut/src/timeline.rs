@@ -4,14 +4,18 @@
 //!
 //! Mouse: wheel zooms around the pointer, Shift+wheel (or a horizontal wheel/touchpad) scrolls,
 //! dragging the strip or a scale moves the view, a click sets the cursor, dragging a range
-//! handle on the frame scale moves that end of the range, an arrow at the edge of the frame
-//! scale (shown when a range end is scrolled out of view) brings that end to the cursor, the
-//! scrollbar thumb can be dragged, double-click on the time scale zooms out to the whole clip.
+//! handle on the frame scale moves that end of the range (Shift: snapped to the time scale's
+//! marks), an arrow at the edge of the frame scale (shown when a range end is scrolled out of
+//! view) brings that end to the edge of the view on a click and takes hold of it on a drag, the
+//! scrollbar thumb can be dragged, double-click on the time scale or the scrollbar zooms out to
+//! the whole clip.
 
 use std::sync::Arc;
 
 use eframe::egui::{self, Color32, CursorIcon, FontId, Pos2, Rect, Sense, Stroke, Vec2};
-use microcut_engine::{RangeEnd, Session, Tile, frame_marks, tiles, time_marks};
+use microcut_engine::{
+    RangeEnd, Session, Side, Tile, frame_marks, snap_boundary, tiles, time_marks,
+};
 use microcut_media::MediaInfo;
 
 use crate::preview::physical_pixels;
@@ -128,11 +132,21 @@ impl Timeline {
         if self.drag.is_none()
             && let Some(hover) = response.hover_pos()
         {
-            if let Some(end) = arrow_at(rows, hover, session) {
+            if let Some((side, end)) = arrow_at(rows, hover, session) {
                 ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
-                let text = match end {
-                    RangeEnd::Start => "Move the range start to the cursor",
-                    RangeEnd::End => "Move the range end to the cursor",
+                let text = match (end, side) {
+                    (RangeEnd::Start, Side::Left) => {
+                        "Click: range start to the left edge. Drag: move the range start."
+                    }
+                    (RangeEnd::Start, Side::Right) => {
+                        "Click: range start to the right edge. Drag: move the range start."
+                    }
+                    (RangeEnd::End, Side::Left) => {
+                        "Click: range end to the left edge. Drag: move the range end."
+                    }
+                    (RangeEnd::End, Side::Right) => {
+                        "Click: range end to the right edge. Drag: move the range end."
+                    }
                 };
                 response.clone().on_hover_text(text);
             } else if handle_at(rows, hover, session).is_some() {
@@ -162,7 +176,7 @@ impl Timeline {
         if response.double_clicked()
             && response
                 .interact_pointer_pos()
-                .is_some_and(|pos| rows.times.contains(pos))
+                .is_some_and(|pos| rows.times.contains(pos) || rows.scrollbar.contains(pos))
         {
             session.view_mut().fit();
         }
@@ -183,10 +197,12 @@ fn drag_kind(rows: &Rows, origin: Pos2, session: &Session) -> Drag {
         };
         return Drag::Scrollbar { grab };
     }
-    if arrow_at(rows, origin, session).is_some() {
-        return Drag::Pan;
+    // Dragging an arrow takes hold of the range end it stands for.
+    match arrow_at(rows, origin, session) {
+        Some((_, RangeEnd::Start)) => Drag::RangeStart,
+        Some((_, RangeEnd::End)) => Drag::RangeEnd,
+        None => handle_at(rows, origin, session).unwrap_or(Drag::Pan),
     }
-    handle_at(rows, origin, session).unwrap_or(Drag::Pan)
 }
 
 fn apply_drag(
@@ -222,7 +238,15 @@ fn apply_drag(
                 session.view_mut().pan(outside * 0.25);
                 ui.ctx().request_repaint();
             }
-            let boundary = session.view().boundary_at(x.clamp(0.0, width));
+            let x = x.clamp(0.0, width);
+            // Shift snaps to the marks of the time scale (seconds etc., depending on zoom).
+            let boundary = if ui.input(|i| i.modifiers.shift) {
+                let view = session.view();
+                let pos = view.pos_at(x);
+                snap_boundary(view, session.frame_rate(), MIN_LABEL_SPACING, pos)
+            } else {
+                session.view().boundary_at(x)
+            };
             // The preview follows the handle.
             if drag == Drag::RangeStart {
                 let start = session.set_range_start(boundary);
@@ -235,11 +259,12 @@ fn apply_drag(
     }
 }
 
-/// A click (press and release without moving): arrow → range end to the cursor, scrollbar →
-/// centre the view there, elsewhere (but on a handle) → cursor to the frame under the pointer.
+/// A click (press and release without moving): arrow → that range end to the edge of the view,
+/// scrollbar → centre the view there, elsewhere (but on a handle) → cursor to the frame under
+/// the pointer.
 fn click(rows: &Rows, pos: Pos2, session: &mut Session) {
-    if let Some(end) = arrow_at(rows, pos, session) {
-        session.range_end_to_cursor(end);
+    if let Some((side, _)) = arrow_at(rows, pos, session) {
+        session.bring_hidden_end(side);
     } else if rows.scrollbar.contains(pos) {
         let view = session.view_mut();
         let centre = scrollbar_pos(rows, pos.x, view.end());
@@ -281,16 +306,17 @@ fn wheel(ui: &egui::Ui, rect: Rect, session: &mut Session) {
     }
 }
 
-/// The arrow (for a range end out of view) under `pos`, if any.
-fn arrow_at(rows: &Rows, pos: Pos2, session: &Session) -> Option<RangeEnd> {
+/// The arrow (for a range end out of view) under `pos`, if any: its side and the range end it
+/// stands for.
+fn arrow_at(rows: &Rows, pos: Pos2, session: &Session) -> Option<(Side, RangeEnd)> {
     if !rows.frames.contains(pos) {
         return None;
     }
     let (left, right) = session.hidden_range_ends();
     if pos.x <= rows.frames.left() + ARROW_WIDTH {
-        left
+        left.map(|end| (Side::Left, end))
     } else if pos.x >= rows.frames.right() - ARROW_WIDTH {
-        right
+        right.map(|end| (Side::Right, end))
     } else {
         None
     }

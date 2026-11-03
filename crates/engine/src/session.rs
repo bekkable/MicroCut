@@ -50,6 +50,15 @@ pub enum RangeEnd {
     End,
 }
 
+/// A side of the timeline view.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Side {
+    /// Earlier frames.
+    Left,
+    /// Later frames.
+    Right,
+}
+
 /// Edit state of one opened video.
 #[derive(Debug, Clone)]
 pub struct Session {
@@ -152,12 +161,26 @@ impl Session {
         (left, right)
     }
 
-    /// Moves `which` end of the range to the cursor (the end keeps the cursor frame included).
-    pub fn range_end_to_cursor(&mut self, which: RangeEnd) {
-        match which {
-            RangeEnd::Start => self.set_range_start(self.cursor),
-            RangeEnd::End => self.set_range_end(self.cursor),
+    /// Moves the range end hidden on `side` (the one [`Session::hidden_range_ends`] names) to
+    /// the first (left) or last (right) fully visible frame. Returns which end moved, if any.
+    pub fn bring_hidden_end(&mut self, side: Side) -> Option<RangeEnd> {
+        let (left, right) = self.hidden_range_ends();
+        let (which, pos) = match side {
+            Side::Left => (left?, self.view.left().ceil()),
+            Side::Right => (right?, self.view.right().floor() - 1.0),
         };
+        let frame = pos.clamp(0.0, self.range_limit() as f64) as i64;
+        self.set_range_end_to(which, frame);
+        Some(which)
+    }
+
+    /// Moves `which` end of the range to `frame` (clamped as by [`Session::set_range_start`] /
+    /// [`Session::set_range_end`]). Returns where it ended up.
+    pub fn set_range_end_to(&mut self, which: RangeEnd, frame: i64) -> i64 {
+        match which {
+            RangeEnd::Start => self.set_range_start(frame),
+            RangeEnd::End => self.set_range_end(frame),
+        }
     }
 
     /// The timeline view.
@@ -265,18 +288,32 @@ mod tests {
     }
 
     #[test]
-    fn range_end_comes_to_the_cursor() {
-        let mut s = session(10, 25);
-        s.set_cursor(80);
-        s.range_end_to_cursor(RangeEnd::End);
-        assert_eq!((s.range().start(), s.range().end()), (0, 80));
-        s.set_cursor(30);
-        s.range_end_to_cursor(RangeEnd::Start);
-        assert_eq!((s.range().start(), s.range().end()), (30, 80));
-        // The start cannot pass the end.
-        s.set_cursor(200);
-        s.range_end_to_cursor(RangeEnd::Start);
-        assert_eq!((s.range().start(), s.range().end()), (80, 80));
+    fn hidden_ends_come_to_the_edge_of_the_view() {
+        let mut s = session(100, 25); // 2500 frames
+        s.view_mut().set_width(1000.0);
+        s.view_mut().zoom_at(0.0, 0.4); // 1 frame per px
+        s.view_mut().set_left(1000.5); // frames 1000.5..2000.5 visible
+        let range = |s: &Session| (s.range().start(), s.range().end());
+
+        // Whole clip selected: the start comes to the first, the end to the last full frame.
+        assert_eq!(s.bring_hidden_end(Side::Left), Some(RangeEnd::Start));
+        assert_eq!(range(&s), (1001, 2499));
+        assert_eq!(s.bring_hidden_end(Side::Right), Some(RangeEnd::End));
+        assert_eq!(range(&s), (1001, 1999));
+        assert_eq!(s.hidden_range_ends(), (None, None));
+        assert_eq!(s.bring_hidden_end(Side::Left), None, "nothing hidden");
+
+        // Range entirely left of the view: its end comes to the left edge (range grows).
+        s.set_range_start(100);
+        s.set_range_end(500);
+        assert_eq!(s.bring_hidden_end(Side::Left), Some(RangeEnd::End));
+        assert_eq!(range(&s), (100, 1001));
+
+        // Range entirely right of the view: its start comes to the right edge.
+        s.set_range_end(2400);
+        s.set_range_start(2100);
+        assert_eq!(s.bring_hidden_end(Side::Right), Some(RangeEnd::Start));
+        assert_eq!(range(&s), (1999, 2400));
     }
 
     #[test]

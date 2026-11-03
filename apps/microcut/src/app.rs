@@ -3,7 +3,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use eframe::egui;
+use eframe::egui::{self, Key, Modifiers};
 use microcut_engine::Session;
 use microcut_media::{FfmpegBackend, MediaBackend, MediaInfo};
 use microcut_time::{ClockStamp, FrameRate};
@@ -493,42 +493,27 @@ enum Jump {
 }
 
 /// Navigation keys. Shift variants come first: `consume_key(NONE, …)` also matches Shift+key.
-const NAVIGATION: &[(egui::Modifiers, egui::Key, Jump)] = &[
-    (
-        egui::Modifiers::SHIFT,
-        egui::Key::ArrowLeft,
-        Jump::Seconds(-1),
-    ),
-    (
-        egui::Modifiers::SHIFT,
-        egui::Key::ArrowRight,
-        Jump::Seconds(1),
-    ),
-    (
-        egui::Modifiers::NONE,
-        egui::Key::ArrowLeft,
-        Jump::Frames(-1),
-    ),
-    (
-        egui::Modifiers::NONE,
-        egui::Key::ArrowRight,
-        Jump::Frames(1),
-    ),
-    (egui::Modifiers::NONE, egui::Key::ArrowUp, Jump::Seconds(1)),
-    (
-        egui::Modifiers::NONE,
-        egui::Key::ArrowDown,
-        Jump::Seconds(-1),
-    ),
-    (egui::Modifiers::NONE, egui::Key::PageUp, Jump::Seconds(10)),
-    (
-        egui::Modifiers::NONE,
-        egui::Key::PageDown,
-        Jump::Seconds(-10),
-    ),
-    (egui::Modifiers::NONE, egui::Key::Home, Jump::First),
-    (egui::Modifiers::NONE, egui::Key::End, Jump::Last),
+/// WASD work like the arrow keys.
+const NAVIGATION: &[(Modifiers, Key, Jump)] = &[
+    (SHIFT, Key::ArrowLeft, Jump::Seconds(-1)),
+    (SHIFT, Key::ArrowRight, Jump::Seconds(1)),
+    (SHIFT, Key::A, Jump::Seconds(-1)),
+    (SHIFT, Key::D, Jump::Seconds(1)),
+    (NONE, Key::ArrowLeft, Jump::Frames(-1)),
+    (NONE, Key::ArrowRight, Jump::Frames(1)),
+    (NONE, Key::ArrowUp, Jump::Seconds(1)),
+    (NONE, Key::ArrowDown, Jump::Seconds(-1)),
+    (NONE, Key::A, Jump::Frames(-1)),
+    (NONE, Key::D, Jump::Frames(1)),
+    (NONE, Key::W, Jump::Seconds(1)),
+    (NONE, Key::S, Jump::Seconds(-1)),
+    (NONE, Key::PageUp, Jump::Seconds(10)),
+    (NONE, Key::PageDown, Jump::Seconds(-10)),
+    (NONE, Key::Home, Jump::First),
+    (NONE, Key::End, Jump::Last),
 ];
+const NONE: Modifiers = Modifiers::NONE;
+const SHIFT: Modifiers = Modifiers::SHIFT;
 
 /// The frame `jump` leads to from `cursor` (clamping to the clip is the session's job).
 fn jump_target(jump: Jump, cursor: i64, last: i64, frames_per_second: i64) -> i64 {
@@ -540,7 +525,7 @@ fn jump_target(jump: Jump, cursor: i64, last: i64, frames_per_second: i64) -> i6
     }
 }
 
-/// ←/→ one frame, ↑/↓ (and Shift+←/→) one second, Page Up/Down ten seconds, Home/End
+/// ←/→ (A/D) one frame, ↑/↓ (W/S, Shift+←/→) one second, Page Up/Down ten seconds, Home/End
 /// first/last frame; the timeline scrolls along. +/− zoom. Only when no text field or other
 /// widget has the keyboard. Returns whether the cursor was moved.
 fn cursor_keys(ui: &mut egui::Ui, session: &mut Session) -> bool {

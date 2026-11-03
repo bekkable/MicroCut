@@ -53,18 +53,13 @@ impl Volume {
     }
 
     /// Shows the control. Must be called in a right-to-left layout (it adds its parts from the
-    /// right: percentage, wedge, speaker).
+    /// right: wedge, speaker). The percentage is drawn inside the wedge, so the layout never
+    /// changes with the number.
     pub fn ui(&mut self, ui: &mut egui::Ui) {
         let percent = (self.level * 100.0).round();
-        ui.label(
-            egui::RichText::new(format!("{percent:>3} %"))
-                .small()
-                .monospace()
-                .weak(),
-        );
 
         let (wedge, wedge_response) =
-            ui.allocate_exact_size(Vec2::new(56.0, 14.0), Sense::click_and_drag());
+            ui.allocate_exact_size(Vec2::new(64.0, 16.0), Sense::click_and_drag());
         if wedge_response.is_pointer_button_down_on()
             && let Some(pos) = wedge_response.interact_pointer_pos()
         {
@@ -119,6 +114,15 @@ impl Volume {
             let part = vec![Pos2::new(l, b), Pos2::new(x, b), Pos2::new(x, y)];
             painter.add(egui::Shape::convex_polygon(part, level_color, Stroke::NONE));
         }
+        // The percentage in the empty upper-left half of the wedge: always readable.
+        let percent = (self.level * 100.0).round();
+        painter.text(
+            Pos2::new(l, t - 1.0),
+            egui::Align2::LEFT_TOP,
+            format!("{percent} %"),
+            egui::FontId::proportional(10.0),
+            visuals.weak_text_color(),
+        );
 
         // Speaker: body and cone, then waves or a cross.
         let color = visuals.text_color();
