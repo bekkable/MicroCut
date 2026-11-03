@@ -1,0 +1,12 @@
+[package]
+name = "microcut-time"
+description = "Exact media time for MicroCut: ticks, frame rates and timecode formatting"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+
+[lints]
+workspace = true

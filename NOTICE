@@ -1,0 +1,12 @@
+MicroCut
+Copyright (c) 2026 The MicroCut contributors
+
+Licensed under either of the Apache License, Version 2.0 (LICENSE-APACHE) or the MIT license (LICENSE-MIT), at your
+option.
+
+Third-party software used at runtime
+------------------------------------
+MicroCut runs FFmpeg (https://ffmpeg.org) as a separate program (`ffmpeg`, `ffprobe`) to read and write video. FFmpeg
+is not part of MicroCut, is not linked into it and is not distributed with it. FFmpeg is licensed under the LGPL 2.1+
+or, depending on the build, the GPL 2+; those terms apply to FFmpeg itself. Anyone who ships an FFmpeg binary together
+with MicroCut must comply with the license of that FFmpeg build.

@@ -1,0 +1,14 @@
+[package]
+name = "microcut"
+description = "MicroCut: a minimal tool to trim a video to a start and end point"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+eframe.workspace = true
+microcut-time.workspace = true
+
+[lints]
+workspace = true
