@@ -33,8 +33,11 @@ Desktop app on Windows, macOS and Linux (egui/eframe).
   expression is fine if one choice is permissive. Never link or vendor copyleft-only code (GPL, LGPL, AGPL, MPL): FFmpeg
   is only ever run as a separate process (see [`NOTICE`](NOTICE)). Ask the user before adding a dependency with a
   license outside that list.
-- **Assets** (icons, sounds, test media) must be openly licensed or original; never commit media files — generate test
-  fixtures with ffmpeg into `target/fixtures/`.
+- **Assets** (icons, sounds, test media) must be openly licensed or original; never commit media files — integration
+  tests generate fixtures with ffmpeg into `$CARGO_TARGET_TMPDIR/fixtures/` (= `target/tmp/fixtures/`) and skip with a
+  note when FFmpeg is missing.
+- **UI text is English.** User-facing errors come from the `Display` of the error types (`MediaError`), so write them
+  as sentences a user understands, with what to do next.
 - **Quality gates** before every commit: `cargo xtask ci` (= `cargo fmt --all --check`,
   `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace`).
 - **New workspace crates** live in `crates/<name>` as `microcut-<name>`, add themselves to `[workspace.dependencies]`
@@ -44,6 +47,7 @@ Desktop app on Windows, macOS and Linux (egui/eframe).
 
 ## Running
 
-- `cargo run` starts the app (`apps/microcut` is the default member).
+- `cargo run` starts the app (`apps/microcut` is the default member); `cargo run -- <video>` opens a video directly.
+- `cargo run -p microcut-media --example probe -- <video>…` prints what the backend reads, without the UI.
 - `cargo xtask ci` runs all quality gates.
-- Requires `ffmpeg` and `ffprobe` in `PATH` at runtime (from M1 on).
+- Requires `ffmpeg` and `ffprobe` at runtime, searched in `MICROCUT_FFMPEG_DIR`, next to the executable, then `PATH`.

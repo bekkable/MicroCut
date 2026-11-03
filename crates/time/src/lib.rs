@@ -39,6 +39,53 @@ impl Tick {
     pub fn saturating_sub(self, rhs: Tick) -> Tick {
         Tick(self.0.saturating_sub(rhs.0))
     }
+
+    /// Parses decimal seconds such as `"12.345000"` or `"-0.5"` exactly (no `f64`).
+    ///
+    /// Up to 6 fractional digits are exact; further digits are rounded to the nearest tick.
+    /// Returns `None` for anything that is not a plain decimal number or does not fit.
+    pub fn parse_decimal_secs(text: &str) -> Option<Tick> {
+        const MAX_FRACTION_DIGITS: usize = 18;
+        let text = text.trim();
+        let (negative, digits) = match text.strip_prefix('-') {
+            Some(rest) => (true, rest),
+            None => (false, text.strip_prefix('+').unwrap_or(text)),
+        };
+        let (int_part, frac_part) = digits.split_once('.').unwrap_or((digits, ""));
+        let all_digits = |s: &str| s.bytes().all(|b| b.is_ascii_digit());
+        if (int_part.is_empty() && frac_part.is_empty()) || !all_digits(int_part) {
+            return None;
+        }
+        if !all_digits(frac_part) {
+            return None;
+        }
+
+        let whole: i128 = if int_part.is_empty() {
+            0
+        } else {
+            int_part.parse().ok()?
+        };
+        let mut ticks = whole.checked_mul(i128::from(TICKS_PER_SECOND))?;
+
+        let frac = frac_part.get(..frac_part.len().min(MAX_FRACTION_DIGITS))?;
+        if !frac.is_empty() {
+            let numerator: i128 = frac.parse().ok()?;
+            let denominator = 10_i128.checked_pow(u32::try_from(frac.len()).ok()?)?;
+            let scaled = numerator.checked_mul(i128::from(TICKS_PER_SECOND))?;
+            // Round half up; the denominator is never zero (10^n, n >= 1).
+            let rounded = scaled
+                .checked_add(denominator / 2)?
+                .checked_div(denominator)?;
+            ticks = ticks.checked_add(rounded)?;
+        }
+
+        let ticks = if negative {
+            ticks.checked_neg()?
+        } else {
+            ticks
+        };
+        i64::try_from(ticks).ok().map(Tick)
+    }
 }
 
 /// A rational frame rate (`num / den` frames per second), e.g. 30000/1001.
@@ -99,6 +146,22 @@ impl fmt::Display for FileStamp {
     }
 }
 
+/// A non-negative time for display, formatted `hh:mm:ss.mmm` (milliseconds truncated).
+///
+/// Negative times format as `00:00:00.000`; hours grow beyond two digits if needed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ClockStamp(pub Tick);
+
+impl fmt::Display for ClockStamp {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let ticks = self.0.0.max(0);
+        let secs = ticks / TICKS_PER_SECOND;
+        let millis = (ticks % TICKS_PER_SECOND) / (TICKS_PER_SECOND / 1000);
+        let (h, m, s) = (secs / 3600, (secs / 60) % 60, secs % 60);
+        write!(f, "{h:02}:{m:02}:{s:02}.{millis:03}")
+    }
+}
+
 /// Range label for an exported cut, `hh-mm-ss-to-hh-mm-ss`; the export is named
 /// `<stem>_<range label>.mp4`.
 pub fn range_label(start: Tick, end: Tick) -> String {
@@ -124,11 +187,66 @@ mod tests {
     }
 
     #[test]
+    fn clock_stamp_shows_milliseconds() {
+        let t = Tick::parse_decimal_secs("3725.0429").unwrap();
+        assert_eq!(ClockStamp(t).to_string(), "01:02:05.042");
+        assert_eq!(ClockStamp(Tick(-1)).to_string(), "00:00:00.000");
+        assert_eq!(ClockStamp(Tick(i64::MAX)).to_string(), "10086:10:01.077");
+    }
+
+    #[test]
     fn ntsc_frames_round_trip_exactly() {
         let rate = FrameRate::new(30_000, 1_001).unwrap();
         for frame in [0, 1, 29, 30, 1_798, 107_892] {
             assert_eq!(rate.tick_to_frame(rate.frame_to_tick(frame)), frame);
         }
+    }
+
+    #[test]
+    fn parses_ffprobe_durations_exactly() {
+        assert_eq!(Tick::parse_decimal_secs("12.345000"), {
+            Some(Tick(
+                12 * TICKS_PER_SECOND + 345 * (TICKS_PER_SECOND / 1000),
+            ))
+        });
+        assert_eq!(
+            Tick::parse_decimal_secs("0.000001"),
+            Some(Tick(TICKS_PER_SECOND / 1_000_000))
+        );
+        assert_eq!(Tick::parse_decimal_secs("7"), Some(Tick::from_secs(7)));
+        assert_eq!(
+            Tick::parse_decimal_secs(".5"),
+            Some(Tick(TICKS_PER_SECOND / 2))
+        );
+        assert_eq!(
+            Tick::parse_decimal_secs("-1.5"),
+            Some(Tick(-3 * TICKS_PER_SECOND / 2))
+        );
+        assert_eq!(Tick::parse_decimal_secs(" 3. "), Some(Tick::from_secs(3)));
+    }
+
+    #[test]
+    fn rejects_hostile_decimal_text() {
+        for bad in [
+            "",
+            ".",
+            "-",
+            "abc",
+            "1.2.3",
+            "1e5",
+            "N/A",
+            "١٢",
+            "--1",
+            "1.-5",
+            "+-1",
+            "99999999999999999999999999999999999999999999",
+            "36400000000", // seconds that overflow i64 ticks
+        ] {
+            assert_eq!(Tick::parse_decimal_secs(bad), None, "{bad:?}");
+        }
+        // Very long fractions are truncated to 18 digits, not rejected.
+        let long = format!("1.{}", "9".repeat(500));
+        assert!(Tick::parse_decimal_secs(&long).is_some());
     }
 
     #[test]

@@ -1,0 +1,16 @@
+[package]
+name = "microcut-media"
+description = "Media backend for MicroCut: probing, decoding and export via ffmpeg"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+microcut-time.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true

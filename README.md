@@ -3,7 +3,8 @@
 A minimal video trimmer in Rust: open a video, pick a start and an end on the timeline, click **Export**. The cut is
 written next to the original, re-encoded with a fixed encoder, named `<original>_hh-mm-ss-to-hh-mm-ss.mp4`.
 
-Status: **M0 — skeleton.** The app opens a window that says "Hello World!". See [`ROADMAP.md`](ROADMAP.md).
+Status: **M1 — open a video.** Open a file (dialog, drag & drop or `microcut <video>`) and see its duration, frame
+count, resolution, frame rate and audio. Preview and timeline come next; see [`ROADMAP.md`](ROADMAP.md).
 
 ## Build and run
 
@@ -12,7 +13,8 @@ cargo run            # start the app
 cargo xtask ci       # fmt, clippy, tests
 ```
 
-Needs Rust ≥ 1.95 and, from M1 on, `ffmpeg`/`ffprobe` in `PATH`.
+Needs Rust ≥ 1.95 to build and [FFmpeg](https://ffmpeg.org) (`ffmpeg` and `ffprobe`) to run: in `PATH`, next to the
+MicroCut executable, or in the folder named by `MICROCUT_FFMPEG_DIR`.
 
 ## License
 

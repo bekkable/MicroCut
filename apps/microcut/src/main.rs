@@ -5,11 +5,15 @@
 
 mod app;
 mod crash;
+mod loader;
 
+use std::path::PathBuf;
 use std::process::ExitCode;
 
 fn main() -> ExitCode {
     crash::install_panic_hook();
+    // `microcut <video>` opens the video right away.
+    let initial = std::env::args_os().nth(1).map(PathBuf::from);
 
     let options = eframe::NativeOptions {
         viewport: eframe::egui::ViewportBuilder::default()
@@ -22,7 +26,7 @@ fn main() -> ExitCode {
     match eframe::run_native(
         "MicroCut",
         options,
-        Box::new(|_cc| Ok(Box::new(app::MicroCutApp::default()))),
+        Box::new(move |cc| Ok(Box::new(app::MicroCutApp::new(&cc.egui_ctx, initial)))),
     ) {
         Ok(()) => ExitCode::SUCCESS,
         Err(err) => {

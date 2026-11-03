@@ -7,7 +7,7 @@ A crate may depend only on crates of a lower layer.
 | Layer | Crate               | Purpose                                                                  | Status |
 | ----- | ------------------- | ------------------------------------------------------------------------ | ------ |
 | L0    | `microcut-time`     | `Tick`, `FrameRate`, timecode / file-name formatting                     | M0     |
-| L1    | `microcut-media`    | `MediaBackend` trait; ffmpeg backend: probe, frame decode, play, export  | M1     |
+| L1    | `microcut-media`    | `MediaBackend` trait; ffmpeg backend: probe (M1), frame decode, play, export | M1     |
 | L2    | `microcut-engine`   | Session state (file, cursor, range, zoom) and commands; UI-independent   | M3     |
 | L5    | `apps/microcut`     | eframe app: window, panels, input, texture upload                        | M0     |
 
@@ -36,6 +36,8 @@ Nothing below L5 depends on egui/eframe/winit/rfd/cpal, so the engine and media 
 
 ## 3. Threads
 
-The UI thread never waits on ffmpeg. Decode, playback and export run on worker threads (under `catch_unwind`) and
-send results over channels; the UI requests a repaint when a result arrives. While scrubbing only the newest frame
-request is served.
+The UI thread never waits on ffmpeg (`apps/microcut/src/loader.rs` is the pattern: worker thread, `catch_unwind`,
+channel, `request_repaint`). Every ffmpeg/ffprobe run has a time limit and capped output
+(`crates/media/src/process.rs`) and no console window on Windows. Decode, playback and export run on worker threads
+(under `catch_unwind`) and send results over channels; the UI requests a repaint when a result arrives. While scrubbing
+only the newest frame request is served.

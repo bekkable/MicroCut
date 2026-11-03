@@ -11,16 +11,17 @@ Each task has an id (`M<milestone>.<n>`); one task per commit.
 
 ## M1 — Open a video
 
-- [ ] M1.1 `crates/media`: `MediaBackend` trait + ffmpeg process backend; locate `ffmpeg`/`ffprobe`, clear error if
+- [x] M1.1 `crates/media`: `MediaBackend` trait + ffmpeg process backend; locate `ffmpeg`/`ffprobe`, clear error if
   missing
-- [ ] M1.2 Probe via `ffprobe -print_format json`: duration, frame rate, size, audio present (hostile-input parsing)
-- [ ] M1.3 Open via file dialog (`rfd`), drag & drop and command-line argument
+- [x] M1.2 Probe via `ffprobe -print_format json`: duration, frame rate, size, rotation, audio (hostile-input parsing)
+- [x] M1.3 Open via file dialog (`rfd`), drag & drop and command-line argument
 
 ## M2 — Preview
 
 - [ ] M2.1 Decode the frame at the cursor (`ffmpeg -ss … -frames:v 1 -f rawvideo -pix_fmt rgba pipe:1`), scaled to
   the preview size, on a background thread
-- [ ] M2.2 Show it in the preview area (top), aspect-correct; latest request wins while scrubbing
+- [ ] M2.2 Show it in the preview area (top), aspect-correct (honour `VideoInfo::rotation` and `MediaInfo::start`);
+  latest request wins while scrubbing
 
 ## M3 — Timeline (bottom of the window)
 
