@@ -9,6 +9,7 @@ use microcut_media::{FfmpegBackend, MediaBackend, MediaInfo};
 use microcut_time::{ClockStamp, FrameRate};
 
 use crate::loader::ProbeJob;
+use crate::playback::{Playback, Step, stop_frame};
 use crate::preview::Preview;
 use crate::thumbs::Thumbnails;
 use crate::timeline::Timeline;
@@ -18,6 +19,9 @@ const VIDEO_EXTENSIONS: &[&str] = &[
     "mp4", "m4v", "mov", "mkv", "webm", "avi", "mts", "m2ts", "ts", "mpg", "mpeg", "wmv", "flv",
     "3gp", "ogv", "mxf",
 ];
+
+/// Picture size for playback before the preview has been laid out.
+const FALLBACK_PLAY_SIZE: (u32, u32) = (1280, 720);
 
 /// Frames-per-pixel factor of one + key press (− uses the inverse).
 const KEY_ZOOM: f64 = 0.5;
@@ -40,8 +44,27 @@ pub struct MicroCutApp {
     preview: Option<Preview>,
     thumbs: Option<Thumbnails>,
     timeline: Timeline,
+    transport: Transport,
     document: Document,
     ctx: egui::Context,
+}
+
+/// Playback state.
+#[derive(Default)]
+struct Transport {
+    playing: Option<Playback>,
+    /// The cursor as playback last set it; any other value means the user moved it.
+    cursor: i64,
+    /// Continue playing from the cursor once the user lets go of the timeline.
+    resume: bool,
+    /// Why playback stopped early or plays without sound.
+    message: Option<String>,
+}
+
+impl Transport {
+    fn is_playing(&self) -> bool {
+        self.playing.is_some() || self.resume
+    }
 }
 
 impl MicroCutApp {
@@ -60,6 +83,7 @@ impl MicroCutApp {
             preview,
             thumbs,
             timeline: Timeline::default(),
+            transport: Transport::default(),
             document: Document::Empty,
             ctx: ctx.clone(),
         };
@@ -70,6 +94,7 @@ impl MicroCutApp {
     }
 
     fn open(&mut self, path: PathBuf) {
+        self.transport = Transport::default();
         self.document = match &self.backend {
             Ok(backend) => {
                 Document::Probing(ProbeJob::start(Arc::clone(backend), path, self.ctx.clone()))
@@ -149,6 +174,92 @@ impl MicroCutApp {
         if let Document::Loaded(session) = &mut self.document {
             cursor_keys(ui, session);
         }
+        let space = ui.memory(|m| m.focused().is_none())
+            && ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Space));
+        if space {
+            self.toggle_play();
+        }
+    }
+
+    fn toggle_play(&mut self) {
+        if self.transport.is_playing() {
+            // The cursor stays on the frame shown last.
+            self.transport.playing = None;
+            self.transport.resume = false;
+        } else {
+            self.start_playback(true);
+        }
+    }
+
+    /// Plays from the cursor. On the last frame: from the start of the range if `rewind`, else
+    /// not at all (continuing after the user jumped to the end).
+    fn start_playback(&mut self, rewind: bool) {
+        let (Ok(backend), Document::Loaded(session)) = (&self.backend, &mut self.document) else {
+            return;
+        };
+        let last = session.last_frame();
+        let range = session.range();
+        if session.cursor() >= last {
+            if !rewind {
+                return;
+            }
+            session.jump_cursor(range.start());
+        }
+        let from = session.cursor();
+        let to = stop_frame(from, (range.start(), range.end()), last);
+        let size = match self.preview.as_ref().map(Preview::size) {
+            Some((w, h)) if w > 0 && h > 0 => (w, h),
+            _ => FALLBACK_PLAY_SIZE,
+        };
+        self.transport.playing = Some(Playback::start(
+            backend,
+            session.media(),
+            (from, to),
+            size,
+            &self.ctx,
+        ));
+        self.transport.cursor = from;
+        self.transport.message = None;
+    }
+
+    /// Moves playback on to the frame its clock has reached (before the preview is drawn).
+    fn step_playback(&mut self) {
+        let Document::Loaded(session) = &mut self.document else {
+            self.transport = Transport::default();
+            return;
+        };
+        if let Some(playback) = &mut self.transport.playing {
+            if session.cursor() != self.transport.cursor {
+                // The user moved the cursor: continue from there (after a drag ends).
+                self.transport.playing = None;
+                self.transport.resume = true;
+            } else {
+                let step = playback.update();
+                if let Some(note) = playback.audio_note() {
+                    self.transport.message = Some(format!("no sound: {note}"));
+                }
+                match step {
+                    Step::Show(frame, picture) => {
+                        if let Some(preview) = &mut self.preview {
+                            preview.present(&self.ctx, frame, &picture);
+                        }
+                        session.jump_cursor(frame);
+                        self.transport.cursor = session.cursor();
+                    }
+                    Step::Wait => {}
+                    Step::Finished => self.transport.playing = None,
+                    Step::Failed(message) => {
+                        self.transport.playing = None;
+                        self.transport.message = Some(message);
+                    }
+                }
+                self.ctx.request_repaint();
+            }
+        }
+        if self.transport.resume && !self.timeline.is_dragging() {
+            self.transport.resume = false;
+            self.start_playback(false);
+        }
     }
 
     fn toolbar(&mut self, ui: &mut egui::Ui) {
@@ -213,19 +324,29 @@ impl eframe::App for MicroCutApp {
         self.poll_probe();
 
         egui::Panel::top("toolbar").show(ui, |ui| self.toolbar(ui));
+        let mut play_clicked = false;
         if let Document::Loaded(session) = &mut self.document {
-            let preview = self.preview.as_ref();
+            let status = Status {
+                preview: self.preview.as_ref(),
+                playing: self.transport.is_playing(),
+                message: self.transport.message.as_deref(),
+            };
             let (timeline, thumbs) = (&mut self.timeline, self.thumbs.as_mut());
             egui::Panel::bottom("timeline")
                 .resizable(false)
                 .show(ui, |ui| {
                     ui.add_space(4.0);
-                    status_line(ui, session, preview);
+                    play_clicked = status_line(ui, session, &status);
                     ui.add_space(4.0);
                     timeline.show(ui, session, thumbs);
                     ui.add_space(4.0);
                 });
         }
+        if play_clicked {
+            self.toggle_play();
+        }
+        // After the timeline (which may move the cursor), before the preview is drawn.
+        self.step_playback();
         egui::CentralPanel::default()
             .frame(egui::Frame::central_panel(ui.style()).inner_margin(0.0))
             .show(ui, |ui| {
@@ -235,9 +356,19 @@ impl eframe::App for MicroCutApp {
     }
 }
 
-/// Cursor time and frame, the selected range and decoder state.
-fn status_line(ui: &mut egui::Ui, session: &Session, preview: Option<&Preview>) {
+/// What the status line shows besides the session.
+struct Status<'a> {
+    preview: Option<&'a Preview>,
+    playing: bool,
+    message: Option<&'a str>,
+}
+
+/// Play/pause button, cursor time and frame, the selected range, playback and decoder state.
+/// Returns whether the play/pause button was clicked.
+fn status_line(ui: &mut egui::Ui, session: &Session, status: &Status<'_>) -> bool {
+    let mut clicked = false;
     ui.horizontal(|ui| {
+        clicked = play_button(ui, status.playing).clicked();
         let rate = session.frame_rate();
         let cursor = session.cursor();
         let time = ClockStamp(rate.frame_to_tick(cursor));
@@ -261,15 +392,60 @@ fn status_line(ui: &mut egui::Ui, session: &Session, preview: Option<&Preview>) 
             range.frame_count()
         ));
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if let Some(preview) = preview {
+            if let Some(preview) = status.preview {
                 if let Some(error) = preview.error() {
                     ui.colored_label(ui.visuals().error_fg_color, error);
-                } else if preview.is_busy() {
+                } else if preview.is_busy() && !status.playing {
                     ui.spinner();
                 }
             }
+            if let Some(message) = status.message {
+                ui.add(egui::Label::new(egui::RichText::new(message).weak()).truncate());
+            }
         });
     });
+    clicked
+}
+
+/// A button with a drawn play triangle or pause bars (the default fonts lack ⏸). It never takes
+/// keyboard focus, so Space always means play/pause.
+fn play_button(ui: &mut egui::Ui, playing: bool) -> egui::Response {
+    let size = egui::vec2(30.0, ui.spacing().interact_size.y);
+    let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click());
+    let response = response.on_hover_text(if playing {
+        "Pause (Space)"
+    } else {
+        "Play from the cursor (Space)"
+    });
+    let visuals = ui.style().interact(&response);
+    let painter = ui.painter();
+    painter.rect(
+        rect,
+        visuals.corner_radius,
+        visuals.weak_bg_fill,
+        visuals.bg_stroke,
+        egui::StrokeKind::Inside,
+    );
+    let color = visuals.fg_stroke.color;
+    let c = rect.center();
+    if playing {
+        for dx in [-3.5, 3.5] {
+            let bar = egui::Rect::from_center_size(c + egui::vec2(dx, 0.0), egui::vec2(3.5, 11.0));
+            painter.rect_filled(bar, 0.0, color);
+        }
+    } else {
+        let points = vec![
+            c + egui::vec2(-4.0, -6.0),
+            c + egui::vec2(-4.0, 6.0),
+            c + egui::vec2(6.0, 0.0),
+        ];
+        painter.add(egui::Shape::convex_polygon(
+            points,
+            color,
+            egui::Stroke::NONE,
+        ));
+    }
+    response
 }
 
 /// ←/→ one frame, Shift+←/→ one second, Home/End first/last frame; the timeline scrolls along.

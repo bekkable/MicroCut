@@ -59,6 +59,19 @@ pub enum MediaError {
     #[error("the duration of the video is unknown")]
     UnknownDuration,
 
+    /// Audio was requested from a file without an audio stream.
+    #[error("the file contains no audio stream")]
+    NoAudioStream,
+
+    /// An audio format no device would ask for (zero rate or channels).
+    #[error("unsupported audio format: {sample_rate} Hz, {channels} channels")]
+    BadAudioFormat {
+        /// Requested sample rate.
+        sample_rate: u32,
+        /// Requested channel count.
+        channels: u16,
+    },
+
     /// The decoder delivered no picture for this frame (e.g. past the end of the video stream).
     #[error("no picture at frame {frame}")]
     NoFrame {

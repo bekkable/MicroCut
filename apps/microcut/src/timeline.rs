@@ -68,6 +68,11 @@ pub struct Timeline {
 }
 
 impl Timeline {
+    /// Whether the pointer is dragging the cursor or a range handle.
+    pub fn is_dragging(&self) -> bool {
+        self.drag.is_some()
+    }
+
     /// Shows the timeline across the available width and applies mouse input to `session`.
     pub fn show(
         &mut self,

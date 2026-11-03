@@ -52,6 +52,15 @@ that each new request overwrites. Thumbnails (`apps/microcut/src/thumbs.rs`) use
 replaces with the currently visible, not yet decoded frames on every repaint, so zooming and scrolling never leave a
 backlog of invisible work.
 
+Playback (`apps/microcut/src/playback.rs`) reads two ffmpeg streams (`MediaBackend::video_stream` /
+`audio_stream`, `crates/media/src/stream.rs`) on two worker threads: pictures go through a channel of six (the
+decoder blocks when it is ahead), samples into a one-second queue that the `cpal` device callback empties
+(`apps/microcut/src/audio.rs`; the callback never blocks — it plays silence if the queue is locked or empty). The
+samples the device has played are the clock; the UI shows the newest picture the clock has reached and drops late
+ones. The clock starts with the first picture, so ffmpeg's start-up time never makes the video jump. Without sound
+(no audio stream, no device, decoder error) or once the sound ended, the system clock continues. Dropping the
+playback kills both ffmpeg processes.
+
 ## 4. Frame-exact seeking
 
 `MediaBackend::decode_frame` takes a frame index, not a time. The ffmpeg backend seeks with `-ss` before `-i` to half
@@ -59,6 +68,10 @@ a frame *before* the frame's start (`crates/media/src/frame.rs`, `seek_target`):
 keyframe and drops frames before the target, and container timestamps may be rounded (Matroska: 1 ms), so aiming at
 the exact start could skip the frame. `crates/media/tests/decode.rs` proves it with fixtures whose frames encode their
 own number in their brightness.
+
+Playback streams seek the same way and pass every decoded picture through unchanged (`-fps_mode passthrough`), so
+picture n of a stream is frame `from + n` — exact for constant-frame-rate video, which `crates/media/tests/stream.rs`
+checks in MP4 and Matroska. Variable-frame-rate video plays with pictures shown at the nominal rate.
 
 The frame count comes from the video stream's duration when the container has one (the container duration also covers
 longer audio), else from the container duration.

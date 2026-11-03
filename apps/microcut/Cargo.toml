@@ -7,6 +7,7 @@ license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+cpal.workspace = true
 eframe.workspace = true
 microcut-engine.workspace = true
 microcut-media.workspace = true

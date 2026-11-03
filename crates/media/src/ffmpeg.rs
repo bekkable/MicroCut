@@ -8,8 +8,11 @@ use microcut_time::DecimalSecs;
 
 use crate::frame::{self, fit_within, rgba_len};
 use crate::locate::{find_tool, search_dirs};
-use crate::process::{self, Limits};
-use crate::{MediaBackend, MediaError, MediaInfo, VideoFrame, probe};
+use crate::process::{self, Limits, Streaming};
+use crate::stream::{self, FfmpegAudioStream, FfmpegVideoStream};
+use crate::{
+    AudioFormat, AudioStream, MediaBackend, MediaError, MediaInfo, VideoFrame, VideoStream, probe,
+};
 
 const PROBE_LIMITS: Limits = Limits {
     timeout: Duration::from_secs(30),
@@ -135,11 +138,123 @@ impl MediaBackend for FfmpegBackend {
             got,
         })
     }
+
+    fn video_stream(
+        &self,
+        media: &MediaInfo,
+        from: i64,
+        count: i64,
+        max_size: (u32, u32),
+    ) -> Result<Box<dyn VideoStream>, MediaError> {
+        let from = frame::clamp_frame(media, from);
+        let count = count.clamp(1, media.frame_count().saturating_sub(from).max(1));
+        let (width, height) = fit_within(media.video.display_size(), max_size);
+        let frame_len = rgba_len(width, height).ok_or(MediaError::BadFrame {
+            width,
+            height,
+            got: 0,
+        })?;
+
+        let seek = DecimalSecs(frame::seek_target(media, from)).to_string();
+        let count_arg = count.to_string();
+        let scale = format!("scale={width}:{height}:flags=bilinear");
+        // As in `decode_frame`; `passthrough` makes every decoded picture one output picture
+        // (no duplicates or drops), so picture n of the stream is frame `from + n`.
+        let args = [
+            OsStr::new("-v"),
+            OsStr::new("error"),
+            OsStr::new("-nostdin"),
+            OsStr::new("-ss"),
+            OsStr::new(&seek),
+            OsStr::new("-i"),
+            media.path.as_os_str(),
+            OsStr::new("-map"),
+            OsStr::new("0:V:0"),
+            OsStr::new("-frames:v"),
+            OsStr::new(&count_arg),
+            OsStr::new("-fps_mode"),
+            OsStr::new("passthrough"),
+            OsStr::new("-vf"),
+            OsStr::new(&scale),
+            OsStr::new("-pix_fmt"),
+            OsStr::new("rgba"),
+            OsStr::new("-f"),
+            OsStr::new("rawvideo"),
+            OsStr::new("pipe:1"),
+        ];
+        let process = Streaming::spawn("ffmpeg", &self.ffmpeg, args, stream::MAX_STDERR)?;
+        Ok(Box::new(FfmpegVideoStream {
+            process,
+            path: media.path.clone(),
+            size: (width, height),
+            frame_len,
+            ended: false,
+        }))
+    }
+
+    fn audio_stream(
+        &self,
+        media: &MediaInfo,
+        from: i64,
+        count: i64,
+        format: AudioFormat,
+    ) -> Result<Box<dyn AudioStream>, MediaError> {
+        if media.audio.is_none() {
+            return Err(MediaError::NoAudioStream);
+        }
+        let AudioFormat {
+            sample_rate,
+            channels,
+        } = format;
+        if !(1..=768_000).contains(&sample_rate) || !(1..=64).contains(&channels) {
+            return Err(MediaError::BadAudioFormat {
+                sample_rate,
+                channels,
+            });
+        }
+        let rate = media.video.frame_rate;
+        let from = frame::clamp_frame(media, from);
+        let start = rate.frame_to_tick(from);
+        let end = rate.frame_to_tick(from.saturating_add(count.max(0)));
+        let start_arg = DecimalSecs(start).to_string();
+        let duration_arg = DecimalSecs(end.saturating_sub(start)).to_string();
+        let (channels_arg, rate_arg) = (channels.to_string(), sample_rate.to_string());
+        // Audio seeks are sample-exact: ffmpeg decodes from before `-ss` and trims.
+        let args = [
+            OsStr::new("-v"),
+            OsStr::new("error"),
+            OsStr::new("-nostdin"),
+            OsStr::new("-ss"),
+            OsStr::new(&start_arg),
+            OsStr::new("-i"),
+            media.path.as_os_str(),
+            OsStr::new("-map"),
+            OsStr::new("0:a:0"),
+            OsStr::new("-vn"),
+            OsStr::new("-t"),
+            OsStr::new(&duration_arg),
+            OsStr::new("-ac"),
+            OsStr::new(&channels_arg),
+            OsStr::new("-ar"),
+            OsStr::new(&rate_arg),
+            OsStr::new("-f"),
+            OsStr::new("f32le"),
+            OsStr::new("pipe:1"),
+        ];
+        let process = Streaming::spawn("ffmpeg", &self.ffmpeg, args, stream::MAX_STDERR)?;
+        Ok(Box::new(FfmpegAudioStream {
+            process,
+            path: media.path.clone(),
+            bytes: Vec::new(),
+            ended: false,
+            pending_error: None,
+        }))
+    }
 }
 
 /// Error from the last stderr line. ffmpeg tools prefix errors with the input path, which the UI
 /// already shows, so that prefix is removed.
-fn tool_failed(tool: &'static str, path: &Path, stderr: &[u8]) -> MediaError {
+pub(crate) fn tool_failed(tool: &'static str, path: &Path, stderr: &[u8]) -> MediaError {
     let line = process::last_line(stderr);
     let prefix = format!("{}: ", path.display());
     let message = line.strip_prefix(&prefix).unwrap_or(&line).to_owned();

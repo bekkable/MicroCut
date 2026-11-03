@@ -45,6 +45,8 @@ pub struct Preview {
     shown: Option<Key>,
     texture: Option<egui::TextureHandle>,
     error: Option<String>,
+    /// Size of the preview area in physical pixels at the last repaint.
+    size: (u32, u32),
 }
 
 impl Preview {
@@ -66,7 +68,28 @@ impl Preview {
             shown: None,
             texture: None,
             error: (!worker_alive).then(|| "could not start the preview decoder".to_owned()),
+            size: (0, 0),
         }
+    }
+
+    /// Size of the preview area in physical pixels (zero before the first repaint).
+    pub fn size(&self) -> (u32, u32) {
+        self.size
+    }
+
+    /// Shows `picture`, decoded elsewhere (playback), as frame `frame`. Decodes still running
+    /// for earlier requests are ignored, and none is started for this frame.
+    pub fn present(&mut self, ctx: &egui::Context, frame: i64, picture: &VideoFrame) {
+        self.generation = self.generation.wrapping_add(1);
+        self.upload(ctx, picture);
+        let key = Key {
+            generation: self.generation,
+            frame,
+            size: self.size,
+        };
+        self.requested = Some(key);
+        self.shown = Some(key);
+        self.error = None;
     }
 
     /// Forgets the current picture (a different file was opened).
@@ -96,6 +119,7 @@ impl Preview {
             physical_pixels(rect.width(), pixels_per_point),
             physical_pixels(rect.height(), pixels_per_point),
         );
+        self.size = size;
 
         let key = Key {
             generation: self.generation,

@@ -17,6 +17,8 @@ microcut-media = { path = "crates/media" }
 microcut-time = { path = "crates/time" }
 
 # External
+# Sound output (Apache-2.0); WASAPI / CoreAudio / ALSA (system library, linked dynamically).
+cpal = "0.18"
 eframe = { version = "0.37", default-features = false, features = [
     "accesskit",
     "clipboard",

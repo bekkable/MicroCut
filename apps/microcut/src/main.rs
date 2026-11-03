@@ -4,8 +4,10 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod app;
+mod audio;
 mod crash;
 mod loader;
+mod playback;
 mod preview;
 mod thumbs;
 mod timeline;

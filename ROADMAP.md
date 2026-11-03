@@ -38,8 +38,11 @@ Each task has an id (`M<milestone>.<n>`); one task per commit.
 
 ## M4 — Playback
 
-- [ ] M4.1 Play/pause from the cursor: stream rawvideo frames from ffmpeg, paced by the clock; cursor moves along
-- [ ] M4.2 Audio playback (`cpal`), video synced to the audio clock
+- [x] M4.1 Play/pause from the cursor (button, Space): stream rawvideo frames from ffmpeg, paced by the clock;
+  cursor moves along and stays where playback stopped. Started inside the range, playback stops at its end, else
+  at the end of the clip. Moving the cursor while playing continues from there (after a drag: on release)
+- [x] M4.2 Audio playback (`cpal`, default output device in its own format), video synced to the audio clock
+  (samples actually played); system clock without sound or after the sound ended
 
 ## M5 — Export
 
