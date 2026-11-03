@@ -13,6 +13,6 @@ mod tiles;
 mod view;
 
 pub use scale::{Mark, frame_marks, time_marks};
-pub use session::{FrameRange, Session};
+pub use session::{FrameRange, RangeEnd, Session};
 pub use tiles::{Tile, tiles};
 pub use view::{MAX_PX_PER_FRAME, View};

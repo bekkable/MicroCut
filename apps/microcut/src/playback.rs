@@ -7,7 +7,7 @@
 
 use std::panic::{self, AssertUnwindSafe};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::mpsc::{self, Receiver, SyncSender, TryRecvError};
 use std::thread;
 use std::time::Instant;
@@ -62,12 +62,14 @@ pub struct Playback {
 }
 
 impl Playback {
-    /// Starts playing frames `from..=last` of `media`, pictures scaled to fit `size`.
+    /// Starts playing frames `from..=last` of `media`, pictures scaled to fit `size`, sound at
+    /// the volume in `gain` (see [`crate::volume`]).
     pub fn start(
         backend: &Arc<dyn MediaBackend>,
         media: &Arc<MediaInfo>,
         (from, last): (i64, i64),
         size: (u32, u32),
+        gain: &Arc<AtomicU32>,
         ctx: &egui::Context,
     ) -> Playback {
         let count = last.saturating_sub(from).saturating_add(1).max(1);
@@ -106,7 +108,7 @@ impl Playback {
 
         let (audio, audio_note) = match &media.audio {
             None => (None, None),
-            Some(_) => match start_audio(backend, media, (from, count)) {
+            Some(_) => match start_audio(backend, media, (from, count), gain) {
                 Ok(out) => (Some(out), None),
                 Err(note) => (None, Some(note)),
             },
@@ -282,8 +284,9 @@ fn start_audio(
     backend: &Arc<dyn MediaBackend>,
     media: &Arc<MediaInfo>,
     span: (i64, i64),
+    gain: &Arc<AtomicU32>,
 ) -> Result<AudioOut, String> {
-    let out = AudioOut::open()?;
+    let out = AudioOut::open(Arc::clone(gain))?;
     let shared = Arc::clone(out.shared());
     let format = out.format();
     let (backend, media) = (Arc::clone(backend), Arc::clone(media));

@@ -11,6 +11,7 @@ mod playback;
 mod preview;
 mod thumbs;
 mod timeline;
+mod volume;
 
 use std::path::PathBuf;
 use std::process::ExitCode;

@@ -23,11 +23,12 @@ Nothing below L5 depends on egui/eframe/winit/rfd/cpal, so the engine and media 
 │            preview (frame at cursor)         │
 │                                              │
 ├──────────────────────────────────────────────┤
-│ ▶  00:01:05.12  range …   [Start] [End] [Export] │
+│ ▶  00:01:05.12  range …   [Export]   🔈◢ 80 % │
 ├──────────────────────────────────────────────┤
-│ frame scale ····|····[=====range=====]····   │
-│ ▮▮▮▮▮▮▮▮▮▮▮ video strip (thumbnails) ▮▮▮▮▮▮▮ │  ← mouse wheel zooms
+│◀frame scale ····|····[=====range=====]····  ▶│  ← arrows: range end out of view
+│ ▮▮▮▮▮▮▮▮▮▮▮ video strip (thumbnails) ▮▮▮▮▮▮▮ │  ← wheel zooms, drag scrolls
 │ time scale  0:00     0:30     1:00     1:30  │
+│ ░░░░░░[▓▓▓]░░░░░░░░ scrollbar ░░░░░░░░░░░░░░ │  ← visible part of the clip
 └──────────────────────────────────────────────┘
 ```
 

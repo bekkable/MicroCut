@@ -1,15 +1,17 @@
 //! The timeline at the bottom of the window: frame scale with the selected range on top, the
-//! video strip with thumbnails in the middle, the time scale below. One cursor line runs through
-//! all three.
+//! video strip with thumbnails in the middle, the time scale below it and a scrollbar showing
+//! which part of the clip is visible. One cursor line runs through the scales and the strip.
 //!
 //! Mouse: wheel zooms around the pointer, Shift+wheel (or a horizontal wheel/touchpad) scrolls,
-//! click/drag moves the cursor, dragging a range handle on the frame scale moves that end of the
-//! range, double-click on the time scale zooms out to the whole clip.
+//! dragging the strip or a scale moves the view, a click sets the cursor, dragging a range
+//! handle on the frame scale moves that end of the range, an arrow at the edge of the frame
+//! scale (shown when a range end is scrolled out of view) brings that end to the cursor, the
+//! scrollbar thumb can be dragged, double-click on the time scale zooms out to the whole clip.
 
 use std::sync::Arc;
 
 use eframe::egui::{self, Color32, CursorIcon, FontId, Pos2, Rect, Sense, Stroke, Vec2};
-use microcut_engine::{Session, Tile, frame_marks, tiles, time_marks};
+use microcut_engine::{RangeEnd, Session, Tile, frame_marks, tiles, time_marks};
 use microcut_media::MediaInfo;
 
 use crate::preview::physical_pixels;
@@ -18,10 +20,15 @@ use crate::thumbs::Thumbnails;
 const FRAME_SCALE_HEIGHT: f32 = 20.0;
 const STRIP_HEIGHT: f32 = 54.0;
 const TIME_SCALE_HEIGHT: f32 = 20.0;
+const SCROLLBAR_HEIGHT: f32 = 12.0;
 const LABEL_FONT_SIZE: f32 = 10.5;
 
 /// How close (points) the pointer must be to a range handle to grab it.
 const HANDLE_GRAB: f64 = 7.0;
+/// Width of the arrows for range ends out of view.
+const ARROW_WIDTH: f32 = 18.0;
+/// Narrowest scrollbar thumb (points), so it stays grabbable at deep zoom.
+const MIN_THUMB: f32 = 16.0;
 /// Labels on a scale are at least this far apart (points).
 const MIN_LABEL_SPACING: f64 = 84.0;
 /// Wheel distance (points) that zooms by a factor of e.
@@ -32,18 +39,25 @@ const THUMB_OVERSIZE: f32 = 1.5;
 const CURSOR_COLOR: Color32 = Color32::from_rgb(255, 86, 64);
 
 /// What a pointer drag moves.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 enum Drag {
-    Cursor,
+    /// The view, with the content under the pointer.
+    Pan,
     RangeStart,
     RangeEnd,
+    /// The scrollbar thumb; `grab` is the pointer's distance (in frames) from the left edge of
+    /// the view.
+    Scrollbar {
+        grab: f64,
+    },
 }
 
-/// The three rows of the timeline.
+/// The rows of the timeline.
 struct Rows {
     frames: Rect,
     strip: Rect,
     times: Rect,
+    scrollbar: Rect,
 }
 
 impl Rows {
@@ -53,11 +67,18 @@ impl Rows {
         };
         let strip_top = rect.top() + FRAME_SCALE_HEIGHT;
         let times_top = strip_top + STRIP_HEIGHT;
+        let scrollbar_top = times_top + TIME_SCALE_HEIGHT;
         Rows {
             frames: split(rect.top(), FRAME_SCALE_HEIGHT),
             strip: split(strip_top, STRIP_HEIGHT),
             times: split(times_top, TIME_SCALE_HEIGHT),
+            scrollbar: split(scrollbar_top, SCROLLBAR_HEIGHT),
         }
+    }
+
+    /// The scales and the strip (where the cursor line runs).
+    fn content(&self) -> Rect {
+        self.frames.union(self.times)
     }
 }
 
@@ -68,7 +89,7 @@ pub struct Timeline {
 }
 
 impl Timeline {
-    /// Whether the pointer is dragging the cursor or a range handle.
+    /// Whether the pointer is dragging the view, a range handle or the scrollbar.
     pub fn is_dragging(&self) -> bool {
         self.drag.is_some()
     }
@@ -80,7 +101,7 @@ impl Timeline {
         session: &mut Session,
         thumbs: Option<&mut Thumbnails>,
     ) {
-        let height = FRAME_SCALE_HEIGHT + STRIP_HEIGHT + TIME_SCALE_HEIGHT;
+        let height = FRAME_SCALE_HEIGHT + STRIP_HEIGHT + TIME_SCALE_HEIGHT + SCROLLBAR_HEIGHT;
         let size = Vec2::new(ui.available_width(), height);
         let (rect, response) = ui.allocate_exact_size(size, Sense::click_and_drag());
         session.view_mut().set_width(f64::from(rect.width()));
@@ -93,7 +114,8 @@ impl Timeline {
         paint_frame_scale(ui, &painter, &rows, session);
         paint_strip(ui, &painter, &rows, session, thumbs);
         paint_time_scale(ui, &painter, &rows, session);
-        paint_cursor(&painter, rect, &rows, session);
+        paint_scrollbar(ui, &painter, &rows, session, self.drag);
+        paint_cursor(&painter, rows.content(), &rows, session);
     }
 
     fn pointer(
@@ -103,9 +125,40 @@ impl Timeline {
         rows: &Rows,
         session: &mut Session,
     ) {
-        let left = rows.frames.left();
-        let width = f64::from(rows.frames.width());
+        if self.drag.is_none()
+            && let Some(hover) = response.hover_pos()
+        {
+            if let Some(end) = arrow_at(rows, hover, session) {
+                ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
+                let text = match end {
+                    RangeEnd::Start => "Move the range start to the cursor",
+                    RangeEnd::End => "Move the range end to the cursor",
+                };
+                response.clone().on_hover_text(text);
+            } else if handle_at(rows, hover, session).is_some() {
+                ui.ctx().set_cursor_icon(CursorIcon::ResizeHorizontal);
+            }
+        }
 
+        if response.drag_started() {
+            let origin = ui
+                .input(|i| i.pointer.press_origin())
+                .or(response.interact_pointer_pos());
+            self.drag = origin.map(|origin| drag_kind(rows, origin, session));
+        }
+        if response.dragged()
+            && let (Some(drag), Some(pos)) = (self.drag, response.interact_pointer_pos())
+        {
+            apply_drag(ui, drag, pos, response.drag_delta(), rows, session);
+        } else {
+            self.drag = None;
+        }
+
+        if response.clicked()
+            && let Some(pos) = response.interact_pointer_pos()
+        {
+            click(rows, pos, session);
+        }
         if response.double_clicked()
             && response
                 .interact_pointer_pos()
@@ -113,55 +166,96 @@ impl Timeline {
         {
             session.view_mut().fit();
         }
+    }
+}
 
-        let pressed =
-            response.is_pointer_button_down_on() && ui.input(|i| i.pointer.primary_down());
-        let pos = response.interact_pointer_pos();
-        let (true, Some(pos)) = (pressed, pos) else {
-            self.drag = None;
-            if let Some(hover) = response.hover_pos()
-                && handle_at(rows, hover, session).is_some()
-            {
-                ui.ctx().set_cursor_icon(CursorIcon::ResizeHorizontal);
-            }
-            return;
-        };
-
-        let drag = *self
-            .drag
-            .get_or_insert_with(|| handle_at(rows, pos, session).unwrap_or(Drag::Cursor));
-        if drag != Drag::Cursor {
-            ui.ctx().set_cursor_icon(CursorIcon::ResizeHorizontal);
-        }
-
-        // Dragging past either end scrolls, faster the further out the pointer is.
-        let x = f64::from(pos.x - left);
-        let outside = if x < 0.0 {
-            x
-        } else if x > width {
-            x - width
+/// What a drag starting at `origin` moves.
+fn drag_kind(rows: &Rows, origin: Pos2, session: &Session) -> Drag {
+    if rows.scrollbar.contains(origin) {
+        let view = session.view();
+        let pos = scrollbar_pos(rows, origin.x, view.end());
+        let on_thumb = (view.left()..=view.left() + view.span()).contains(&pos);
+        // Grabbing the track outside the thumb centres the view on the pointer first.
+        let grab = if on_thumb {
+            pos - view.left()
         } else {
-            0.0
+            view.span() / 2.0
         };
-        if outside != 0.0 {
-            session.view_mut().pan(outside * 0.25);
-            ui.ctx().request_repaint();
-        }
-        let x = x.clamp(0.0, width);
+        return Drag::Scrollbar { grab };
+    }
+    if arrow_at(rows, origin, session).is_some() {
+        return Drag::Pan;
+    }
+    handle_at(rows, origin, session).unwrap_or(Drag::Pan)
+}
 
-        let view = *session.view();
-        match drag {
-            Drag::Cursor => session.set_cursor(view.frame_at(x)),
-            Drag::RangeStart => {
-                let start = session.set_range_start(view.boundary_at(x));
-                session.set_cursor(start);
+fn apply_drag(
+    ui: &egui::Ui,
+    drag: Drag,
+    pos: Pos2,
+    delta: Vec2,
+    rows: &Rows,
+    session: &mut Session,
+) {
+    let width = f64::from(rows.frames.width());
+    match drag {
+        Drag::Pan => {
+            ui.ctx().set_cursor_icon(CursorIcon::Grabbing);
+            session.view_mut().pan(-f64::from(delta.x));
+        }
+        Drag::Scrollbar { grab } => {
+            let pos = scrollbar_pos(rows, pos.x, session.view().end());
+            session.view_mut().set_left(pos - grab);
+        }
+        Drag::RangeStart | Drag::RangeEnd => {
+            ui.ctx().set_cursor_icon(CursorIcon::ResizeHorizontal);
+            // Dragging past either end scrolls, faster the further out the pointer is.
+            let x = f64::from(pos.x - rows.frames.left());
+            let outside = if x < 0.0 {
+                x
+            } else if x > width {
+                x - width
+            } else {
+                0.0
+            };
+            if outside != 0.0 {
+                session.view_mut().pan(outside * 0.25);
+                ui.ctx().request_repaint();
             }
-            Drag::RangeEnd => {
-                let end = session.set_range_end(view.boundary_at(x).saturating_sub(1));
+            let boundary = session.view().boundary_at(x.clamp(0.0, width));
+            // The preview follows the handle.
+            if drag == Drag::RangeStart {
+                let start = session.set_range_start(boundary);
+                session.set_cursor(start);
+            } else {
+                let end = session.set_range_end(boundary.saturating_sub(1));
                 session.set_cursor(end);
             }
         }
     }
+}
+
+/// A click (press and release without moving): arrow → range end to the cursor, scrollbar →
+/// centre the view there, elsewhere (but on a handle) → cursor to the frame under the pointer.
+fn click(rows: &Rows, pos: Pos2, session: &mut Session) {
+    if let Some(end) = arrow_at(rows, pos, session) {
+        session.range_end_to_cursor(end);
+    } else if rows.scrollbar.contains(pos) {
+        let view = session.view_mut();
+        let centre = scrollbar_pos(rows, pos.x, view.end());
+        let span = view.span();
+        view.set_left(centre - span / 2.0);
+    } else if handle_at(rows, pos, session).is_none() {
+        let x = f64::from(pos.x - rows.frames.left());
+        let frame = session.view().frame_at(x);
+        session.set_cursor(frame);
+    }
+}
+
+/// Frame position (in the whole clip) for a screen x on the scrollbar.
+fn scrollbar_pos(rows: &Rows, x: f32, frames: f64) -> f64 {
+    let width = f64::from(rows.scrollbar.width()).max(1.0);
+    f64::from(x - rows.scrollbar.left()) / width * frames
 }
 
 /// Wheel: zoom around the pointer; horizontal wheel or Shift+wheel: scroll.
@@ -184,6 +278,21 @@ fn wheel(ui: &egui::Ui, rect: Rect, session: &mut Session) {
     }
     if scroll.x != 0.0 {
         view.pan(-f64::from(scroll.x));
+    }
+}
+
+/// The arrow (for a range end out of view) under `pos`, if any.
+fn arrow_at(rows: &Rows, pos: Pos2, session: &Session) -> Option<RangeEnd> {
+    if !rows.frames.contains(pos) {
+        return None;
+    }
+    let (left, right) = session.hidden_range_ends();
+    if pos.x <= rows.frames.left() + ARROW_WIDTH {
+        left
+    } else if pos.x >= rows.frames.right() - ARROW_WIDTH {
+        right
+    } else {
+        None
     }
 }
 
@@ -251,6 +360,81 @@ fn paint_frame_scale(ui: &egui::Ui, painter: &egui::Painter, rows: &Rows, sessio
             scale_label(painter, row, (at, egui::Align2::LEFT_TOP), label, text);
         }
     }
+
+    // Arrows for range ends scrolled out of view (click: bring that end to the cursor).
+    let (left, right) = session.hidden_range_ends();
+    let sides = [
+        (left.is_some(), row.left(), -1.0),
+        (right.is_some(), row.right() - ARROW_WIDTH, 1.0),
+    ];
+    for (shown, x0, direction) in sides {
+        if !shown {
+            continue;
+        }
+        let area = Rect::from_x_y_ranges(x0..=x0 + ARROW_WIDTH, row.y_range());
+        painter.rect_filled(area, 0.0, accent);
+        let c = area.center();
+        let tip = c + Vec2::new(5.0 * direction, 0.0);
+        let back = c - Vec2::new(4.0 * direction, 0.0);
+        let points = vec![tip, back + Vec2::new(0.0, -6.0), back + Vec2::new(0.0, 6.0)];
+        painter.add(egui::Shape::convex_polygon(
+            points,
+            visuals.strong_text_color(),
+            Stroke::NONE,
+        ));
+    }
+}
+
+/// The scrollbar: the whole clip as the track, the visible part as the thumb, plus the range
+/// and the cursor for orientation.
+fn paint_scrollbar(
+    ui: &egui::Ui,
+    painter: &egui::Painter,
+    rows: &Rows,
+    session: &Session,
+    drag: Option<Drag>,
+) {
+    let visuals = ui.visuals();
+    let track = rows.scrollbar.shrink2(Vec2::new(0.0, 2.0));
+    painter.rect_filled(track, 3.0, visuals.extreme_bg_color);
+
+    let view = session.view();
+    let frames = view.end().max(1.0);
+    let at = |pos: f64| track.left() + (pos / frames * f64::from(track.width())) as f32;
+
+    let range = session.range();
+    let band = Rect::from_x_y_ranges(
+        at(range.start() as f64)..=at(range.end().saturating_add(1) as f64),
+        track.y_range(),
+    );
+    painter.rect_filled(band, 0.0, visuals.selection.bg_fill.gamma_multiply(0.35));
+
+    let (mut x0, mut x1) = (at(view.left()), at(view.left() + view.span()));
+    if x1 - x0 < MIN_THUMB {
+        let c = (x0 + x1) / 2.0;
+        x0 = (c - MIN_THUMB / 2.0).max(track.left());
+        x1 = (x0 + MIN_THUMB).min(track.right());
+    }
+    let thumb = Rect::from_x_y_ranges(x0..=x1, track.y_range());
+    let active = matches!(drag, Some(Drag::Scrollbar { .. }))
+        || ui
+            .input(|i| i.pointer.hover_pos())
+            .is_some_and(|pos| thumb.contains(pos));
+    let fill = if active {
+        visuals.widgets.hovered.bg_fill
+    } else {
+        visuals.widgets.inactive.bg_fill
+    };
+    painter.rect(
+        thumb,
+        3.0,
+        fill,
+        visuals.widgets.inactive.bg_stroke,
+        egui::StrokeKind::Inside,
+    );
+
+    let cursor = at(session.cursor() as f64);
+    painter.vline(cursor, track.y_range(), Stroke::new(1.5, CURSOR_COLOR));
 }
 
 fn paint_time_scale(ui: &egui::Ui, painter: &egui::Painter, rows: &Rows, session: &Session) {

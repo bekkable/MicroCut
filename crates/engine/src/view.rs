@@ -108,6 +108,19 @@ impl View {
         }
     }
 
+    /// Scrolls so that frame position `pos` is at the left edge (as far as the clip allows).
+    pub fn set_left(&mut self, pos: f64) {
+        if pos.is_finite() {
+            self.left = pos;
+            self.clamp_left();
+        }
+    }
+
+    /// Frames visible at once (the whole clip when it is shorter than the view).
+    pub fn span(&self) -> f64 {
+        (self.width * self.per_px).min(self.frames)
+    }
+
     /// Frame position at `x`.
     pub fn pos_at(&self, x: f64) -> f64 {
         self.left + x * self.per_px
@@ -219,6 +232,23 @@ mod tests {
         v.pan(1e9);
         assert!(close(v.left(), 9000.0));
         assert!(close(v.right(), 10_000.0));
+    }
+
+    #[test]
+    fn set_left_is_clamped_to_the_clip() {
+        let mut v = view(10_000, 1000.0);
+        v.zoom_at(0.0, 0.1); // 1000 frames visible
+        assert!(close(v.span(), 1000.0));
+        v.set_left(4000.0);
+        assert!(close(v.left(), 4000.0));
+        v.set_left(9500.0);
+        assert!(close(v.left(), 9000.0));
+        v.set_left(-1.0);
+        assert!(close(v.left(), 0.0));
+        v.set_left(f64::NAN);
+        assert!(close(v.left(), 0.0));
+        let short = view(3, 1000.0);
+        assert!(close(short.span(), 3.0));
     }
 
     #[test]

@@ -111,9 +111,10 @@ impl Preview {
         self.error.as_deref()
     }
 
-    /// Fills the available space with frame `frame` of `media`.
-    pub fn show(&mut self, ui: &mut egui::Ui, media: &Arc<MediaInfo>, frame: i64) {
-        let (rect, _) = ui.allocate_exact_size(ui.available_size(), egui::Sense::hover());
+    /// Fills the available space with frame `frame` of `media`. Returns whether the picture was
+    /// clicked.
+    pub fn show(&mut self, ui: &mut egui::Ui, media: &Arc<MediaInfo>, frame: i64) -> bool {
+        let (rect, response) = ui.allocate_exact_size(ui.available_size(), egui::Sense::click());
         let pixels_per_point = ui.ctx().pixels_per_point();
         let size = (
             physical_pixels(rect.width(), pixels_per_point),
@@ -138,6 +139,7 @@ impl Preview {
             let uv = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
             painter.image(texture.id(), fitted, uv, egui::Color32::WHITE);
         }
+        response.clicked()
     }
 
     fn request(&mut self, key: Key, media: &Arc<MediaInfo>) {

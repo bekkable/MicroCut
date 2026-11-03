@@ -35,6 +35,9 @@ Each task has an id (`M<milestone>.<n>`); one task per commit.
   frame at the dragged handle); the whole clip is selected after opening
 - [x] M3.5 Cursor: click/drag to select a frame; preview follows. Replaces the temporary slider from M2.2 (the arrow
   key bindings stay)
+- [x] M3.6 Feedback: dragging the strip or a scale moves the view (a click sets the cursor); arrows at the edges of
+  the frame scale for range ends out of view — a click brings that end to the cursor; scrollbar below the time
+  scale (thumb = visible part, draggable, click on the track centres the view there, wheel zooms)
 
 ## M4 — Playback
 
@@ -43,6 +46,8 @@ Each task has an id (`M<milestone>.<n>`); one task per commit.
   at the end of the clip. Moving the cursor while playing continues from there (after a drag: on release)
 - [x] M4.2 Audio playback (`cpal`, default output device in its own format), video synced to the audio clock
   (samples actually played); system clock without sound or after the sound ended
+- [x] M4.3 Feedback: navigation keys pause playback; ↑/↓ one second, Page Up/Down ten seconds; a click on the
+  preview plays/pauses; small volume control (speaker = mute, wedge, wheel) on the right of the status line
 
 ## M5 — Export
 

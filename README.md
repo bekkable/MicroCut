@@ -9,13 +9,17 @@ next; see [`ROADMAP.md`](ROADMAP.md).
 
 | Input                                  | Action                                         |
 | -------------------------------------- | ---------------------------------------------- |
-| Space / ▶ button                       | Play from the cursor / pause                   |
+| Space / ▶ button / click on the picture | Play from the cursor / pause                  |
 | Mouse wheel / `+` `−`                  | Zoom the timeline (at the pointer / cursor)    |
-| Shift+wheel, horizontal wheel          | Scroll the timeline                            |
-| Click / drag on the timeline           | Move the cursor                                |
+| Drag the timeline or its scrollbar, Shift+wheel | Scroll the timeline                   |
+| Click on the timeline                  | Move the cursor                                |
 | Drag a range handle (frame scale)      | Move the start or end of the range             |
+| Click an edge arrow (frame scale)      | Bring a range end that is out of view to the cursor |
 | Double-click the time scale            | Show the whole clip                            |
-| ←/→, Shift+←/→, Home/End               | One frame, one second, first/last frame        |
+| ←/→                                    | One frame (keys pause playback)                |
+| ↑/↓ (or Shift+←/→), Page Up/Down       | One second, ten seconds                        |
+| Home/End                               | First/last frame                               |
+| Speaker / wedge / wheel (status line)  | Mute, set volume                               |
 | Ctrl+O                                 | Open a video                                   |
 
 ## Build and run

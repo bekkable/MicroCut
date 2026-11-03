@@ -2,13 +2,15 @@
 //! it and counts what it played, which is the playback clock.
 
 use std::collections::VecDeque;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex, PoisonError};
 use std::time::Duration;
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{FromSample, SampleFormat, SizedSample};
 use microcut_media::AudioFormat;
+
+use crate::volume::gain_of;
 
 /// Queue length in seconds of audio: enough to ride out a slow decoder, short enough to stop
 /// promptly.
@@ -29,6 +31,8 @@ pub struct AudioShared {
     /// Asks the decoder to stop.
     stop: AtomicBool,
     error: Mutex<Option<String>>,
+    /// Volume set by the user (see [`crate::volume`]), applied to every sample.
+    gain: Arc<AtomicU32>,
 }
 
 impl AudioShared {
@@ -115,12 +119,13 @@ impl AudioShared {
             out.fill(silence);
             return;
         };
+        let gain = gain_of(&self.gain);
         let mut taken: u64 = 0;
         for slot in out.iter_mut() {
             *slot = match queue.pop_front() {
                 Some(sample) => {
                     taken += 1;
-                    T::from_sample(sample)
+                    T::from_sample(sample * gain)
                 }
                 None => silence,
             };
@@ -141,8 +146,8 @@ pub struct AudioOut {
 
 impl AudioOut {
     /// Opens the default output device in its preferred format and starts it (silent until
-    /// [`AudioShared::start`]).
-    pub fn open() -> Result<AudioOut, String> {
+    /// [`AudioShared::start`]); samples are scaled by the gain in `gain`.
+    pub fn open(gain: Arc<AtomicU32>) -> Result<AudioOut, String> {
         let host = cpal::default_host();
         let device = host
             .default_output_device()
@@ -169,6 +174,7 @@ impl AudioOut {
             decoder_done: AtomicBool::new(false),
             stop: AtomicBool::new(false),
             error: Mutex::new(None),
+            gain,
         });
 
         let stream = match supported.sample_format() {
@@ -235,6 +241,7 @@ mod tests {
             decoder_done: AtomicBool::new(false),
             stop: AtomicBool::new(false),
             error: Mutex::new(None),
+            gain: Arc::new(AtomicU32::new(1.0f32.to_bits())),
         }
     }
 
@@ -273,6 +280,17 @@ mod tests {
         let mut out = [7i16; 3];
         s.fill(&mut out);
         assert_eq!(out, [i16::MAX, i16::MIN, 0]);
+    }
+
+    #[test]
+    fn volume_scales_the_samples() {
+        let s = shared(16);
+        s.start();
+        s.gain.store(0.25f32.to_bits(), Ordering::Release);
+        assert!(s.push(&[0.8, -0.4]));
+        let mut out = [0.0f32; 2];
+        s.fill(&mut out);
+        assert_eq!(out, [0.2, -0.1]);
     }
 
     #[test]

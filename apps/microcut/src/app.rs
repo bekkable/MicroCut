@@ -13,6 +13,7 @@ use crate::playback::{Playback, Step, stop_frame};
 use crate::preview::Preview;
 use crate::thumbs::Thumbnails;
 use crate::timeline::Timeline;
+use crate::volume::Volume;
 
 /// File extensions offered in the open dialog. Anything ffmpeg reads can still be dropped.
 const VIDEO_EXTENSIONS: &[&str] = &[
@@ -45,6 +46,7 @@ pub struct MicroCutApp {
     thumbs: Option<Thumbnails>,
     timeline: Timeline,
     transport: Transport,
+    volume: Volume,
     document: Document,
     ctx: egui::Context,
 }
@@ -84,6 +86,7 @@ impl MicroCutApp {
             thumbs,
             timeline: Timeline::default(),
             transport: Transport::default(),
+            volume: Volume::default(),
             document: Document::Empty,
             ctx: ctx.clone(),
         };
@@ -171,8 +174,14 @@ impl MicroCutApp {
         if ui.input_mut(|i| i.consume_shortcut(&OPEN_SHORTCUT)) {
             self.open_dialog();
         }
-        if let Document::Loaded(session) = &mut self.document {
-            cursor_keys(ui, session);
+        let moved = match &mut self.document {
+            Document::Loaded(session) => cursor_keys(ui, session),
+            _ => false,
+        };
+        if moved {
+            // Navigating with the keyboard pauses playback (on the frame the key chose).
+            self.transport.playing = None;
+            self.transport.resume = false;
         }
         let space = ui.memory(|m| m.focused().is_none())
             && ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Space));
@@ -216,6 +225,7 @@ impl MicroCutApp {
             session.media(),
             (from, to),
             size,
+            &self.volume.gain(),
             &self.ctx,
         ));
         self.transport.cursor = from;
@@ -243,7 +253,12 @@ impl MicroCutApp {
                         if let Some(preview) = &mut self.preview {
                             preview.present(&self.ctx, frame, &picture);
                         }
-                        session.jump_cursor(frame);
+                        // The timeline follows the cursor, unless the user is moving it.
+                        if self.timeline.is_dragging() {
+                            session.set_cursor(frame);
+                        } else {
+                            session.jump_cursor(frame);
+                        }
                         self.transport.cursor = session.cursor();
                     }
                     Step::Wait => {}
@@ -292,7 +307,9 @@ impl MicroCutApp {
         }
     }
 
-    fn document_view(&mut self, ui: &mut egui::Ui) {
+    /// The central area. Returns whether the preview picture was clicked.
+    fn document_view(&mut self, ui: &mut egui::Ui) -> bool {
+        let mut clicked = false;
         match &mut self.document {
             Document::Empty => {
                 ui.centered_and_justified(|ui| {
@@ -307,7 +324,7 @@ impl MicroCutApp {
             }
             Document::Loaded(session) => {
                 if let Some(preview) = &mut self.preview {
-                    preview.show(ui, session.media(), session.cursor());
+                    clicked = preview.show(ui, session.media(), session.cursor());
                 }
             }
             Document::Failed { path, message } => {
@@ -315,6 +332,7 @@ impl MicroCutApp {
                 ui.colored_label(ui.visuals().error_fg_color, message);
             }
         }
+        clicked
     }
 }
 
@@ -332,11 +350,12 @@ impl eframe::App for MicroCutApp {
                 message: self.transport.message.as_deref(),
             };
             let (timeline, thumbs) = (&mut self.timeline, self.thumbs.as_mut());
+            let volume = &mut self.volume;
             egui::Panel::bottom("timeline")
                 .resizable(false)
                 .show(ui, |ui| {
                     ui.add_space(4.0);
-                    play_clicked = status_line(ui, session, &status);
+                    play_clicked = status_line(ui, session, &status, volume);
                     ui.add_space(4.0);
                     timeline.show(ui, session, thumbs);
                     ui.add_space(4.0);
@@ -347,12 +366,19 @@ impl eframe::App for MicroCutApp {
         }
         // After the timeline (which may move the cursor), before the preview is drawn.
         self.step_playback();
-        egui::CentralPanel::default()
+        let preview_clicked = egui::CentralPanel::default()
             .frame(egui::Frame::central_panel(ui.style()).inner_margin(0.0))
             .show(ui, |ui| {
-                self.document_view(ui);
+                let clicked = self.document_view(ui);
                 drop_hint(ui);
-            });
+                clicked
+            })
+            .inner;
+        // A click on the picture plays or pauses (takes effect on the next repaint).
+        if preview_clicked {
+            self.toggle_play();
+            self.ctx.request_repaint();
+        }
     }
 }
 
@@ -363,9 +389,14 @@ struct Status<'a> {
     message: Option<&'a str>,
 }
 
-/// Play/pause button, cursor time and frame, the selected range, playback and decoder state.
-/// Returns whether the play/pause button was clicked.
-fn status_line(ui: &mut egui::Ui, session: &Session, status: &Status<'_>) -> bool {
+/// Play/pause button, cursor time and frame, the selected range, playback and decoder state,
+/// volume. Returns whether the play/pause button was clicked.
+fn status_line(
+    ui: &mut egui::Ui,
+    session: &Session,
+    status: &Status<'_>,
+    volume: &mut Volume,
+) -> bool {
     let mut clicked = false;
     ui.horizontal(|ui| {
         clicked = play_button(ui, status.playing).clicked();
@@ -392,6 +423,8 @@ fn status_line(ui: &mut egui::Ui, session: &Session, status: &Status<'_>) -> boo
             range.frame_count()
         ));
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            volume.ui(ui);
+            ui.add_space(8.0);
             if let Some(preview) = status.preview {
                 if let Some(error) = preview.error() {
                     ui.colored_label(ui.visuals().error_fg_color, error);
@@ -448,36 +481,82 @@ fn play_button(ui: &mut egui::Ui, playing: bool) -> egui::Response {
     response
 }
 
-/// ←/→ one frame, Shift+←/→ one second, Home/End first/last frame; the timeline scrolls along.
-/// Only when no text field or other widget has the keyboard.
-fn cursor_keys(ui: &mut egui::Ui, session: &mut Session) {
+/// Where a navigation key moves the cursor.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Jump {
+    /// By this many frames (negative: back).
+    Frames(i64),
+    /// By this many seconds (rounded to whole frames).
+    Seconds(i64),
+    First,
+    Last,
+}
+
+/// Navigation keys. Shift variants come first: `consume_key(NONE, …)` also matches Shift+key.
+const NAVIGATION: &[(egui::Modifiers, egui::Key, Jump)] = &[
+    (
+        egui::Modifiers::SHIFT,
+        egui::Key::ArrowLeft,
+        Jump::Seconds(-1),
+    ),
+    (
+        egui::Modifiers::SHIFT,
+        egui::Key::ArrowRight,
+        Jump::Seconds(1),
+    ),
+    (
+        egui::Modifiers::NONE,
+        egui::Key::ArrowLeft,
+        Jump::Frames(-1),
+    ),
+    (
+        egui::Modifiers::NONE,
+        egui::Key::ArrowRight,
+        Jump::Frames(1),
+    ),
+    (egui::Modifiers::NONE, egui::Key::ArrowUp, Jump::Seconds(1)),
+    (
+        egui::Modifiers::NONE,
+        egui::Key::ArrowDown,
+        Jump::Seconds(-1),
+    ),
+    (egui::Modifiers::NONE, egui::Key::PageUp, Jump::Seconds(10)),
+    (
+        egui::Modifiers::NONE,
+        egui::Key::PageDown,
+        Jump::Seconds(-10),
+    ),
+    (egui::Modifiers::NONE, egui::Key::Home, Jump::First),
+    (egui::Modifiers::NONE, egui::Key::End, Jump::Last),
+];
+
+/// The frame `jump` leads to from `cursor` (clamping to the clip is the session's job).
+fn jump_target(jump: Jump, cursor: i64, last: i64, frames_per_second: i64) -> i64 {
+    match jump {
+        Jump::Frames(n) => cursor.saturating_add(n),
+        Jump::Seconds(n) => cursor.saturating_add(n.saturating_mul(frames_per_second)),
+        Jump::First => 0,
+        Jump::Last => last,
+    }
+}
+
+/// ←/→ one frame, ↑/↓ (and Shift+←/→) one second, Page Up/Down ten seconds, Home/End
+/// first/last frame; the timeline scrolls along. +/− zoom. Only when no text field or other
+/// widget has the keyboard. Returns whether the cursor was moved.
+fn cursor_keys(ui: &mut egui::Ui, session: &mut Session) -> bool {
     if ui.memory(|m| m.focused().is_some()) {
-        return;
+        return false;
     }
     let second = frames_per_second(session.frame_rate());
     let (cursor, last) = (session.cursor(), session.last_frame());
-    let target = ui.input_mut(|i| {
-        let shift = egui::Modifiers::SHIFT;
-        let none = egui::Modifiers::NONE;
-        // Shift variants first: `consume_key(NONE, …)` would also match Shift+key.
-        if i.consume_key(shift, egui::Key::ArrowLeft) {
-            Some(cursor.saturating_sub(second))
-        } else if i.consume_key(shift, egui::Key::ArrowRight) {
-            Some(cursor.saturating_add(second))
-        } else if i.consume_key(none, egui::Key::ArrowLeft) {
-            Some(cursor.saturating_sub(1))
-        } else if i.consume_key(none, egui::Key::ArrowRight) {
-            Some(cursor.saturating_add(1))
-        } else if i.consume_key(none, egui::Key::Home) {
-            Some(0)
-        } else if i.consume_key(none, egui::Key::End) {
-            Some(last)
-        } else {
-            None
-        }
+    let jump = ui.input_mut(|i| {
+        NAVIGATION
+            .iter()
+            .find(|(modifiers, key, _)| i.consume_key(*modifiers, *key))
+            .map(|(_, _, jump)| *jump)
     });
-    if let Some(target) = target {
-        session.jump_cursor(target);
+    if let Some(jump) = jump {
+        session.jump_cursor(jump_target(jump, cursor, last, second));
     }
 
     // + / − zoom the timeline around the cursor.
@@ -499,6 +578,7 @@ fn cursor_keys(ui: &mut egui::Ui, session: &mut Session) {
         view.zoom_at(anchor, factor);
         session.jump_cursor(session.cursor());
     }
+    jump.is_some()
 }
 
 /// Frames in one second, rounded (at least 1).
@@ -578,6 +658,31 @@ mod tests {
         assert_eq!(fps(30_000, 1_001), "29.97 fps");
         assert_eq!(fps(24_000, 1_001), "23.976 fps");
         assert_eq!(fps(50, 2), "25 fps");
+    }
+
+    #[test]
+    fn navigation_jumps() {
+        let target = |jump| jump_target(jump, 1000, 5000, 60);
+        assert_eq!(target(Jump::Frames(-1)), 999);
+        assert_eq!(target(Jump::Seconds(1)), 1060);
+        assert_eq!(target(Jump::Seconds(-10)), 400);
+        assert_eq!(target(Jump::First), 0);
+        assert_eq!(target(Jump::Last), 5000);
+        assert_eq!(
+            jump_target(Jump::Seconds(10), i64::MAX - 5, 0, 60),
+            i64::MAX
+        );
+    }
+
+    #[test]
+    fn keys_are_bound_once() {
+        for (n, (modifiers, key, _)) in NAVIGATION.iter().enumerate() {
+            let twice = NAVIGATION
+                .iter()
+                .skip(n + 1)
+                .any(|(m, k, _)| m == modifiers && k == key);
+            assert!(!twice, "{modifiers:?} {key:?} bound twice");
+        }
     }
 
     #[test]
