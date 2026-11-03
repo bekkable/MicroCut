@@ -195,13 +195,15 @@ impl MediaBackend for FfmpegBackend {
     fn audio_stream(
         &self,
         media: &MediaInfo,
+        track: usize,
         from: i64,
         count: i64,
         format: AudioFormat,
     ) -> Result<Box<dyn AudioStream>, MediaError> {
-        if media.audio.is_none() {
+        if track >= media.audio.len() {
             return Err(MediaError::NoAudioStream);
         }
+        let map_arg = format!("0:a:{track}");
         let AudioFormat {
             sample_rate,
             channels,
@@ -229,7 +231,7 @@ impl MediaBackend for FfmpegBackend {
             OsStr::new("-i"),
             media.path.as_os_str(),
             OsStr::new("-map"),
-            OsStr::new("0:a:0"),
+            OsStr::new(&map_arg),
             OsStr::new("-vn"),
             OsStr::new("-t"),
             OsStr::new(&duration_arg),

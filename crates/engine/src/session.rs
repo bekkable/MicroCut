@@ -68,10 +68,13 @@ pub struct Session {
     /// Always within the clip, `start <= end`.
     range: FrameRange,
     view: View,
+    /// Index into `media.audio`; 0 when there is no audio.
+    audio_track: usize,
 }
 
 impl Session {
-    /// A fresh session: cursor on the first frame, the whole clip selected, zoomed to fit.
+    /// A fresh session: cursor on the first frame, the whole clip selected, zoomed to fit,
+    /// first audio track.
     pub fn new(media: Arc<MediaInfo>) -> Session {
         let last = clamp_frame(&media, i64::MAX);
         let view = View::new(last.saturating_add(1));
@@ -83,7 +86,23 @@ impl Session {
                 end: last,
             },
             view,
+            audio_track: 0,
         }
+    }
+
+    /// The selected audio track (index into the media's audio tracks), if there is audio.
+    pub fn audio_track(&self) -> Option<usize> {
+        (self.audio_track < self.media.audio.len()).then_some(self.audio_track)
+    }
+
+    /// Selects audio track `track`; ignored if the media has no such track. Returns whether the
+    /// selection changed.
+    pub fn set_audio_track(&mut self, track: usize) -> bool {
+        let changed = track < self.media.audio.len() && track != self.audio_track;
+        if changed {
+            self.audio_track = track;
+        }
+        changed
     }
 
     /// The opened video.
@@ -202,7 +221,7 @@ impl Session {
 mod tests {
     use std::path::PathBuf;
 
-    use microcut_media::VideoInfo;
+    use microcut_media::{AudioInfo, VideoInfo};
 
     use super::*;
 
@@ -219,7 +238,7 @@ mod tests {
                 frame_rate: FrameRate::new(fps, 1).unwrap(),
                 rotation: 0,
             },
-            audio: None,
+            audio: Vec::new(),
         };
         Session::new(Arc::new(media))
     }
@@ -233,6 +252,29 @@ mod tests {
         assert_eq!(s.range().end(), 249);
         assert_eq!(s.range().frame_count(), 250);
         assert_eq!(s.range().end_time(s.frame_rate()), Tick::from_secs(10));
+    }
+
+    #[test]
+    fn audio_track_selection_stays_valid() {
+        let silent = session(10, 25);
+        assert_eq!(silent.audio_track(), None);
+
+        let track = |title: &str| AudioInfo {
+            codec: "aac".to_owned(),
+            sample_rate: Some(48_000),
+            channels: Some(2),
+            title: Some(title.to_owned()),
+            language: None,
+        };
+        let mut media = (**silent.media()).clone();
+        media.audio = vec![track("Mic"), track("Music")];
+        let mut s = Session::new(Arc::new(media));
+        assert_eq!(s.audio_track(), Some(0));
+        assert!(s.set_audio_track(1));
+        assert_eq!(s.audio_track(), Some(1));
+        assert!(!s.set_audio_track(1), "already selected");
+        assert!(!s.set_audio_track(2), "no such track");
+        assert_eq!(s.audio_track(), Some(1));
     }
 
     #[test]

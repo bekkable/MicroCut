@@ -53,12 +53,15 @@ Each task has an id (`M<milestone>.<n>`); one task per commit.
   preview plays/pauses; small volume control (speaker = mute, wedge, wheel) on the right of the status line
 - [x] M4.4 Feedback: the volume percentage is drawn inside the wedge (no layout jumps); WASD work like the arrow
   keys
+- [x] M4.5 Several audio tracks (e.g. OBS "Mic" / "Music"): numbered buttons `[0] [1] …` left of the speaker switch
+  the track played (also while playing); tooltip with title, language and format
 
 ## M5 — Export
 
 - [ ] M5.1 Set start/end (buttons + `I`/`O` keys)
 - [ ] M5.2 Export with the fixed encoder (H.264 `libx264` CRF 18 `preset medium`, AAC 192 kb/s, `.mp4`) next to the
-  original as `<stem>_hh-mm-ss-to-hh-mm-ss.mp4`; never overwrite (append ` (2)`, …)
+  original as `<stem>_hh-mm-ss-to-hh-mm-ss.mp4`; never overwrite (append ` (2)`, …). Open question for the user:
+  with several audio tracks, export the selected one, all of them, or a mix?
 - [ ] M5.3 Progress bar (`-progress pipe:1`), cancel, error display
 
 ## Later

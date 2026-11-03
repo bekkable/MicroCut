@@ -59,8 +59,8 @@ pub enum MediaError {
     #[error("the duration of the video is unknown")]
     UnknownDuration,
 
-    /// Audio was requested from a file without an audio stream.
-    #[error("the file contains no audio stream")]
+    /// Audio was requested from a track the file does not have.
+    #[error("the file contains no such audio track")]
     NoAudioStream,
 
     /// An audio format no device would ask for (zero rate or channels).

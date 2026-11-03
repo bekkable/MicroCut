@@ -15,8 +15,8 @@ pub struct MediaInfo {
     pub duration: Tick,
     /// The first video stream (cover pictures are skipped).
     pub video: VideoInfo,
-    /// The first audio stream, if any.
-    pub audio: Option<AudioInfo>,
+    /// The audio streams in file order; track `n` is ffmpeg's `0:a:n`.
+    pub audio: Vec<AudioInfo>,
 }
 
 impl MediaInfo {
@@ -61,7 +61,7 @@ impl VideoInfo {
     }
 }
 
-/// The audio stream.
+/// An audio stream.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AudioInfo {
     /// Codec name, e.g. `aac`.
@@ -70,4 +70,8 @@ pub struct AudioInfo {
     pub sample_rate: Option<u32>,
     /// Number of channels, if known.
     pub channels: Option<u32>,
+    /// Title tag, e.g. `Mic` (OBS names its tracks), if set.
+    pub title: Option<String>,
+    /// Language tag, e.g. `eng`, if set and not `und`.
+    pub language: Option<String>,
 }

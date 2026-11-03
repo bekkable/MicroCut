@@ -82,7 +82,8 @@ fn probes_generated_clip() {
         "{}",
         info.frame_count()
     );
-    let audio = info.audio.unwrap();
+    assert_eq!(info.audio.len(), 1);
+    let audio = &info.audio[0];
     assert_eq!(audio.codec, "aac");
     assert_eq!(audio.sample_rate, Some(48_000));
     assert_eq!(audio.channels, Some(2));

@@ -20,6 +20,7 @@ next; see [`ROADMAP.md`](ROADMAP.md).
 | ↑/↓ or W/S (or Shift+←/→), Page Up/Down | One second, ten seconds                       |
 | Home/End                               | First/last frame                               |
 | Speaker / wedge / wheel (status line)  | Mute, set volume                               |
+| `[0] [1] …` left of the speaker        | Choose the audio track (videos with several)   |
 | Ctrl+O                                 | Open a video                                   |
 
 ## Build and run

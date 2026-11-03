@@ -50,11 +50,13 @@ pub trait MediaBackend: Send + Sync {
         max_size: (u32, u32),
     ) -> Result<Box<dyn VideoStream>, MediaError>;
 
-    /// Decodes the first audio stream from the start of frame `from` for the duration of
-    /// `count` frames, converted to `format` (interleaved `f32` samples).
+    /// Decodes audio track `track` (index into [`MediaInfo::audio`]) from the start of frame
+    /// `from` for the duration of `count` frames, converted to `format` (interleaved `f32`
+    /// samples).
     fn audio_stream(
         &self,
         media: &MediaInfo,
+        track: usize,
         from: i64,
         count: i64,
         format: AudioFormat,

@@ -12,6 +12,12 @@ use crate::{AudioInfo, MediaError, MediaInfo, VideoInfo};
 /// Frame rates above this are treated as bogus (e.g. a 90 kHz timebase reported as rate).
 const MAX_FPS: u32 = 1_000;
 
+/// Audio tracks kept; a hostile file could list thousands.
+const MAX_AUDIO_TRACKS: usize = 32;
+
+/// Tags longer than this are cut (they end up in tooltips).
+const MAX_TAG_CHARS: usize = 64;
+
 #[derive(Deserialize, Default)]
 #[serde(default)]
 struct ProbeJson {
@@ -62,6 +68,8 @@ struct SideDataJson {
 struct TagsJson {
     /// Clockwise degrees (legacy MP4 tag).
     rotate: Option<String>,
+    title: Option<String>,
+    language: Option<String>,
 }
 
 /// Turns ffprobe's JSON into [`MediaInfo`] for the file at `path`.
@@ -79,8 +87,10 @@ pub(crate) fn parse_probe(json: &[u8], path: PathBuf) -> Result<MediaInfo, Media
     let audio = probe
         .streams
         .iter()
-        .find(|s| s.codec_type.as_deref() == Some("audio"))
-        .map(parse_audio);
+        .filter(|s| s.codec_type.as_deref() == Some("audio"))
+        .take(MAX_AUDIO_TRACKS)
+        .map(parse_audio)
+        .collect();
 
     // The video stream's own length wins: the container length also covers longer audio, which
     // would add frames that do not exist. Matroska has no stream duration, hence the fallback.
@@ -139,7 +149,20 @@ fn parse_audio(s: &StreamJson) -> AudioInfo {
             .channels
             .and_then(|c| u32::try_from(c).ok())
             .filter(|c| *c > 0),
+        title: tag(s.tags.title.as_deref()),
+        language: tag(s.tags.language.as_deref()).filter(|l| l != "und"),
     }
+}
+
+/// A tag for display: trimmed, control characters removed, capped; `None` if empty.
+fn tag(text: Option<&str>) -> Option<String> {
+    let text: String = text?
+        .chars()
+        .filter(|c| !c.is_control())
+        .take(MAX_TAG_CHARS)
+        .collect();
+    let text = text.trim();
+    (!text.is_empty()).then(|| text.to_owned())
 }
 
 /// `"30000/1001"` → 30000/1001; `"0/0"`, garbage and implausible rates → `None`.
@@ -231,10 +254,66 @@ mod tests {
         assert_eq!(info.video.rotation, 90);
         assert_eq!(info.video.display_size(), (1080, 1920));
         assert_eq!(info.frame_count(), 300);
-        let audio = info.audio.unwrap();
+        assert_eq!(info.audio.len(), 1);
+        let audio = &info.audio[0];
         assert_eq!(
             (audio.codec.as_str(), audio.sample_rate, audio.channels),
             ("aac", Some(48_000), Some(2))
+        );
+        assert_eq!(
+            (audio.title.as_deref(), audio.language.as_deref()),
+            (None, None)
+        );
+    }
+
+    #[test]
+    fn lists_every_audio_track_with_its_tags() {
+        // As OBS writes them: two titled tracks; an `und` language means "not set".
+        let info = parse(
+            r#"{ "streams": [
+                { "codec_type": "video", "width": 4, "height": 2, "avg_frame_rate": "60/1" },
+                { "codec_type": "audio", "codec_name": "aac", "tags": { "title": "Mic" } },
+                { "codec_type": "data" },
+                { "codec_type": "audio", "codec_name": "opus",
+                  "tags": { "title": " Music\u0007 ", "language": "eng" } },
+                { "codec_type": "audio", "tags": { "title": "", "language": "und" } } ],
+              "format": { "duration": "1" } }"#,
+        )
+        .unwrap();
+        let tags: Vec<_> = info
+            .audio
+            .iter()
+            .map(|a| (a.codec.as_str(), a.title.as_deref(), a.language.as_deref()))
+            .collect();
+        assert_eq!(
+            tags,
+            [
+                ("aac", Some("Mic"), None),
+                ("opus", Some("Music"), Some("eng")),
+                ("", None, None),
+            ]
+        );
+    }
+
+    #[test]
+    fn audio_track_count_and_tag_length_are_capped() {
+        let track = format!(
+            r#"{{ "codec_type": "audio", "tags": {{ "title": "{}" }} }}"#,
+            "x".repeat(1000)
+        );
+        let streams = std::iter::once(
+            r#"{ "codec_type": "video", "width": 4, "height": 2, "avg_frame_rate": "60/1" }"#
+                .to_owned(),
+        )
+        .chain(std::iter::repeat_n(track, 100))
+        .collect::<Vec<_>>()
+        .join(",");
+        let json = format!(r#"{{ "streams": [{streams}], "format": {{ "duration": "1" }} }}"#);
+        let info = parse(&json).unwrap();
+        assert_eq!(info.audio.len(), MAX_AUDIO_TRACKS);
+        assert_eq!(
+            info.audio[0].title.as_deref().map(str::len),
+            Some(MAX_TAG_CHARS)
         );
     }
 
@@ -254,7 +333,7 @@ mod tests {
         assert_eq!(info.video.frame_rate, FrameRate::new(25, 1).unwrap());
         assert_eq!(info.duration, Tick(9 * TPS / 2));
         assert_eq!(info.start, Tick(14 * TPS / 10));
-        assert!(info.audio.is_none());
+        assert!(info.audio.is_empty());
         assert_eq!(info.video.rotation, 0);
     }
 

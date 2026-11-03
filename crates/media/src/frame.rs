@@ -113,7 +113,7 @@ mod tests {
                 frame_rate: FrameRate::new(fps, 1).unwrap(),
                 rotation: 0,
             },
-            audio: None,
+            audio: Vec::new(),
         }
     }
 

@@ -41,12 +41,14 @@ fn main() -> ExitCode {
                     v.frame_rate.den(),
                     v.rotation
                 );
-                match &info.audio {
-                    Some(a) => println!(
-                        "  audio     {} {:?} Hz {:?} ch",
-                        a.codec, a.sample_rate, a.channels
-                    ),
-                    None => println!("  audio     none"),
+                if info.audio.is_empty() {
+                    println!("  audio     none");
+                }
+                for (track, a) in info.audio.iter().enumerate() {
+                    println!(
+                        "  audio {track}   {} {:?} Hz {:?} ch, title {:?}, language {:?}",
+                        a.codec, a.sample_rate, a.channels, a.title, a.language
+                    );
                 }
                 let last = info.frame_count().saturating_sub(1);
                 for frame in [0, last / 2, last] {

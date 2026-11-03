@@ -13,6 +13,7 @@ use crate::playback::{Playback, Step, stop_frame};
 use crate::preview::Preview;
 use crate::thumbs::Thumbnails;
 use crate::timeline::Timeline;
+use crate::tracks;
 use crate::volume::Volume;
 
 /// File extensions offered in the open dialog. Anything ffmpeg reads can still be dropped.
@@ -190,6 +191,17 @@ impl MicroCutApp {
         }
     }
 
+    /// Switches to audio track `track`; a running playback continues from the cursor with it.
+    fn select_audio_track(&mut self, track: usize) {
+        let Document::Loaded(session) = &mut self.document else {
+            return;
+        };
+        if session.set_audio_track(track) && self.transport.playing.is_some() {
+            self.transport.playing = None;
+            self.start_playback(false);
+        }
+    }
+
     fn toggle_play(&mut self) {
         if self.transport.is_playing() {
             // The cursor stays on the frame shown last.
@@ -225,7 +237,7 @@ impl MicroCutApp {
             session.media(),
             (from, to),
             size,
-            &self.volume.gain(),
+            (session.audio_track(), &self.volume.gain()),
             &self.ctx,
         ));
         self.transport.cursor = from;
@@ -286,7 +298,9 @@ impl MicroCutApp {
                 self.open_dialog();
             }
             let summary = match &self.document {
-                Document::Loaded(session) => Some(media_summary(session.media())),
+                Document::Loaded(session) => {
+                    Some(media_summary(session.media(), session.audio_track()))
+                }
                 _ => None,
             };
             let path = self.current_path().map(|p| p.display().to_string());
@@ -342,7 +356,7 @@ impl eframe::App for MicroCutApp {
         self.poll_probe();
 
         egui::Panel::top("toolbar").show(ui, |ui| self.toolbar(ui));
-        let mut play_clicked = false;
+        let mut actions = StatusActions::default();
         if let Document::Loaded(session) = &mut self.document {
             let status = Status {
                 preview: self.preview.as_ref(),
@@ -355,14 +369,17 @@ impl eframe::App for MicroCutApp {
                 .resizable(false)
                 .show(ui, |ui| {
                     ui.add_space(4.0);
-                    play_clicked = status_line(ui, session, &status, volume);
+                    actions = status_line(ui, session, &status, volume);
                     ui.add_space(4.0);
                     timeline.show(ui, session, thumbs);
                     ui.add_space(4.0);
                 });
         }
-        if play_clicked {
+        if actions.play {
             self.toggle_play();
+        }
+        if let Some(track) = actions.track {
+            self.select_audio_track(track);
         }
         // After the timeline (which may move the cursor), before the preview is drawn.
         self.step_playback();
@@ -389,17 +406,26 @@ struct Status<'a> {
     message: Option<&'a str>,
 }
 
+/// What the user asked for in the status line.
+#[derive(Default)]
+struct StatusActions {
+    /// The play/pause button was clicked.
+    play: bool,
+    /// This audio track was chosen.
+    track: Option<usize>,
+}
+
 /// Play/pause button, cursor time and frame, the selected range, playback and decoder state,
-/// volume. Returns whether the play/pause button was clicked.
+/// audio tracks, volume.
 fn status_line(
     ui: &mut egui::Ui,
     session: &Session,
     status: &Status<'_>,
     volume: &mut Volume,
-) -> bool {
-    let mut clicked = false;
+) -> StatusActions {
+    let mut actions = StatusActions::default();
     ui.horizontal(|ui| {
-        clicked = play_button(ui, status.playing).clicked();
+        actions.play = play_button(ui, status.playing).clicked();
         let rate = session.frame_rate();
         let cursor = session.cursor();
         let time = ClockStamp(rate.frame_to_tick(cursor));
@@ -424,6 +450,8 @@ fn status_line(
         ));
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             volume.ui(ui);
+            ui.add_space(6.0);
+            actions.track = tracks::buttons(ui, &session.media().audio, session.audio_track());
             ui.add_space(8.0);
             if let Some(preview) = status.preview {
                 if let Some(error) = preview.error() {
@@ -437,7 +465,7 @@ fn status_line(
             }
         });
     });
-    clicked
+    actions
 }
 
 /// A button with a drawn play triangle or pause bars (the default fonts lack ⏸). It never takes
@@ -572,26 +600,20 @@ fn frames_per_second(rate: FrameRate) -> i64 {
     ((num + den / 2) / den).max(1)
 }
 
-/// `h264 1280×720 · 60 fps · aac 48 kHz stereo · 00:08:55.300`
-fn media_summary(info: &MediaInfo) -> String {
+/// `h264 1280×720 · 60 fps · aac 48 kHz stereo · 00:08:55.300`, describing the selected audio
+/// track (`· 2 audio tracks` when there are several).
+fn media_summary(info: &MediaInfo, track: Option<usize>) -> String {
     let video = &info.video;
     let (w, h) = video.display_size();
     let mut parts = vec![
         format!("{} {w}×{h}", video.codec),
         format_fps(video.frame_rate),
     ];
-    if let Some(audio) = &info.audio {
-        let mut text = audio.codec.clone();
-        if let Some(rate) = audio.sample_rate {
-            text.push_str(&format!(" {} kHz", f64::from(rate) / 1000.0));
-        }
-        match audio.channels {
-            Some(1) => text.push_str(" mono"),
-            Some(2) => text.push_str(" stereo"),
-            Some(n) => text.push_str(&format!(" {n} ch")),
-            None => {}
-        }
-        parts.push(text);
+    if let Some(audio) = track.and_then(|t| info.audio.get(t)) {
+        parts.push(tracks::describe(audio));
+    }
+    if info.audio.len() > 1 {
+        parts.push(format!("{} audio tracks", info.audio.len()));
     }
     parts.push(ClockStamp(info.duration).to_string());
     parts.join(" · ")
