@@ -23,7 +23,9 @@ jobs:
       matrix:
         # Linux twice: 22.04 packages FFmpeg 4.4 (the oldest MicroCut supports, `-vsync` instead of
         # `-fps_mode`), 24.04 a current one.
-        os: [windows-latest, macos-latest, ubuntu-22.04, ubuntu-24.04]
+        # macOS is paused: GitHub's macOS runners were out of capacity (jobs never started, Nov 2026). To bring
+        # it back, add `macos-latest` here and in release.yml (ROADMAP M6.6).
+        os: [windows-latest, ubuntu-22.04, ubuntu-24.04]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v6

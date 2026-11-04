@@ -130,9 +130,10 @@ and `icon.ico`; both are committed. The window gets `icon.png` at run time, `app
 and the version information into the Windows exe (`winresource`, the SDK's `rc.exe`; without it the build only warns),
 and `cargo xtask dist` turns `icon.png` into the bundle's `MicroCut.icns` (`sips`, `iconutil`).
 
-GitHub Actions: `.github/workflows/ci.yml` runs `cargo xtask ci` on Windows, macOS, Ubuntu 22.04 (FFmpeg 4.4) and
-Ubuntu 24.04 with FFmpeg installed (pushes to `main`, pull requests). `.github/workflows/release.yml` runs on a tag
-`v<version>`: it checks the tag against the version in `Cargo.toml`, runs the CI workflow, builds the three archives
+GitHub Actions: `.github/workflows/ci.yml` runs `cargo xtask ci` on Windows, Ubuntu 22.04 (FFmpeg 4.4) and Ubuntu
+24.04 with FFmpeg installed (pushes to `main`, pull requests); macOS is paused while GitHub's macOS runners lack
+capacity (ROADMAP M6.6). `.github/workflows/release.yml` runs on a tag `v<version>`: it checks the tag against the
+version in `Cargo.toml`, runs the CI workflow, builds the archives (macOS paused, as in CI)
 (Linux on Ubuntu 22.04 for an older glibc) and creates a draft release with them and `SHA256SUMS.txt`, to be published
 by hand. The archives are not signed with a Windows or Apple certificate (macOS gets only the ad-hoc signature it needs
 to start); instead the workflow attests their build provenance (`actions/attest`: a Sigstore certificate for the

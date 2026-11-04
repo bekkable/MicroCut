@@ -105,6 +105,10 @@ FFmpeg is not shipped: users install it themselves (see `NOTICE`).
   error says to install a newer FFmpeg. CI also runs the gates on Ubuntu 22.04 with its FFmpeg 4.4
 - [ ] M6.5 Build provenance: the release workflow attests the archives (`actions/attest`, Sigstore, no key of our
   own); `gh attestation verify <archive> -R Najoko/MicroCut` checks a download. Ticked after the first release
+- [ ] M6.6 macOS back in CI and releases: paused because GitHub's macOS runners never picked up the jobs (three runs
+  on 2026-11-04, "not acquired … capacity constraints"). Add `macos-latest` to the matrices in `ci.yml` and
+  `release.yml` again; the first run also tests the untried macOS part of `cargo xtask dist` (`lipo`, `codesign`,
+  icns, `ditto`)
 
 ## Later
 

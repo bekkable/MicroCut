@@ -33,7 +33,8 @@ jobs:
     strategy:
       matrix:
         # Linux: the oldest supported runner, so the binary also runs on older glibc versions.
-        os: [windows-latest, macos-latest, ubuntu-22.04]
+        # macOS is paused (see ci.yml); add `macos-latest` again for the MicroCut.app archive.
+        os: [windows-latest, ubuntu-22.04]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v6
