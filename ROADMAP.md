@@ -84,6 +84,18 @@ Each task has an id (`M<milestone>.<n>`); one task per commit.
   track, encoding time, fps and speed against real time; "Show in folder" and "Close" (Enter). Fix: a duration that
   ffprobe rounds to microseconds no longer loses the last frame (`MediaInfo::frame_count`)
 
+## M6 — Release
+
+FFmpeg is not shipped: users install it themselves (see `NOTICE`).
+
+- [x] M6.1 `cargo xtask dist`: release archive for the platform it runs on — Windows x86_64 `.zip` (exe), macOS
+  `.zip` with `MicroCut.app` (universal binary: Apple Silicon + Intel, ad-hoc signed), Linux x86_64 `.tar.gz`; each
+  with README, licenses and NOTICE, in `dist/`. FFmpeg is also searched in the usual Homebrew/MacPorts folders on
+  macOS (apps started from the Finder do not get the shell's `PATH`)
+- [ ] M6.2 GitHub Actions: `ci.yml` (quality gates on Windows, macOS and Linux for pushes and pull requests),
+  `release.yml` (a tag `v*` builds the three archives, adds `SHA256SUMS.txt` and opens a draft release)
+- [ ] M6.3 App icon: original artwork, in the window, the Windows exe and the macOS bundle
+
 ## Later
 
 - Remember window size and last folder

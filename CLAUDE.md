@@ -50,4 +50,5 @@ Desktop app on Windows, macOS and Linux (egui/eframe).
 - `cargo run` starts the app (`apps/microcut` is the default member); `cargo run -- <video>` opens a video directly.
 - `cargo run -p microcut-media --example probe -- <video>…` prints what the backend reads, without the UI.
 - `cargo xtask ci` runs all quality gates.
+- `cargo xtask dist` builds the release archive for the platform it runs on into `dist/` (`xtask/src/dist.rs`).
 - Requires `ffmpeg` and `ffprobe` at runtime, searched in `MICROCUT_FFMPEG_DIR`, next to the executable, then `PATH`.

@@ -102,3 +102,12 @@ stays frame-exact and the sound covers the same span (it ends early only where t
 
 The frame count comes from the video stream's duration when the container has one (the container duration also covers
 longer audio), else from the container duration.
+
+## 5. Release
+
+`cargo xtask dist` (`xtask/src/dist.rs`) builds the release binary and packs it with README, licenses and NOTICE into
+`dist/microcut-<version>-<platform>.<zip|tar.gz>`, using only the system's tools: Windows' own `tar.exe` writes the
+zip, macOS gets `MicroCut.app` (both architectures merged with `lipo`, `Info.plist`, ad-hoc `codesign`, zipped by
+`ditto`), Linux a `.tar.gz` (keeps the executable bit). FFmpeg is not included (`NOTICE`); an app started from the
+macOS Finder has a minimal `PATH`, so the backend also looks in the Homebrew and MacPorts folders
+(`crates/media/src/locate.rs`).

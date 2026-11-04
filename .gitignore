@@ -2,3 +2,4 @@
 /plan
 *.rs.bk
 .DS_Store
+/dist
