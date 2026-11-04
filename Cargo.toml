@@ -31,6 +31,8 @@ rfd = "0.17"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
+# Build only (MIT): icon and version information in the Windows exe, via the Windows SDK's resource compiler.
+winresource = "0.1"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

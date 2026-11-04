@@ -21,6 +21,21 @@ const DOCS: &[&str] = &["README.md", "LICENSE-MIT", "LICENSE-APACHE", "NOTICE"];
 const MACOS_TARGETS: &[&str] = &["aarch64-apple-darwin", "x86_64-apple-darwin"];
 const BUNDLE_ID: &str = "io.github.najoko.microcut";
 const MACOS_MIN_VERSION: &str = "11.0";
+/// The app icon (1024 px), relative to the workspace root.
+const ICON_PNG: &str = "apps/microcut/assets/icon.png";
+/// Pictures of a macOS `.iconset`: file name and edge length in pixels.
+const ICONSET: &[(&str, u32)] = &[
+    ("icon_16x16.png", 16),
+    ("icon_16x16@2x.png", 32),
+    ("icon_32x32.png", 32),
+    ("icon_32x32@2x.png", 64),
+    ("icon_128x128.png", 128),
+    ("icon_128x128@2x.png", 256),
+    ("icon_256x256.png", 256),
+    ("icon_256x256@2x.png", 512),
+    ("icon_512x512.png", 512),
+    ("icon_512x512@2x.png", 1024),
+];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Platform {
@@ -127,8 +142,13 @@ fn bundle_app(cargo: &str, root: &Path, target_dir: &Path, stage: &Path) -> Resu
     let app = stage.join(format!("{APP_NAME}.app"));
     let contents = app.join("Contents");
     let macos = contents.join("MacOS");
+    let resources = contents.join("Resources");
     create_dir(&macos)?;
-    create_dir(&contents.join("Resources"))?;
+    create_dir(&resources)?;
+    icns(
+        &root.join(ICON_PNG),
+        &resources.join(format!("{APP_NAME}.icns")),
+    )?;
 
     let mut lipo = Command::new("lipo");
     lipo.arg("-create").arg("-output").arg(macos.join(BIN));
@@ -146,6 +166,29 @@ fn bundle_app(cargo: &str, root: &Path, target_dir: &Path, stage: &Path) -> Resu
     run_tool(&mut sign, "codesign")
 }
 
+/// `icon.png` scaled to every size of an `.iconset` (`sips`), packed into `.icns` (`iconutil`).
+fn icns(png: &Path, icns: &Path) -> Result<(), String> {
+    let iconset = icns.with_extension("iconset");
+    create_dir(&iconset)?;
+    for (file, edge) in ICONSET {
+        let edge = edge.to_string();
+        let mut sips = Command::new("sips");
+        sips.args(["-z", &edge, &edge]).arg(png);
+        sips.arg("--out").arg(iconset.join(file));
+        sips.stdout(std::process::Stdio::null());
+        run_tool(&mut sips, "sips")?;
+    }
+    let mut iconutil = Command::new("iconutil");
+    iconutil
+        .args(["-c", "icns"])
+        .arg(&iconset)
+        .arg("-o")
+        .arg(icns);
+    run_tool(&mut iconutil, "iconutil")?;
+    fs::remove_dir_all(&iconset)
+        .map_err(|e| format!("could not clean up {}: {e}", iconset.display()))
+}
+
 /// The bundle's `Info.plist`.
 fn info_plist() -> String {
     format!(
@@ -161,6 +204,8 @@ fn info_plist() -> String {
 	<string>{BUNDLE_ID}</string>
 	<key>CFBundleExecutable</key>
 	<string>{BIN}</string>
+	<key>CFBundleIconFile</key>
+	<string>{APP_NAME}</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
@@ -273,8 +318,9 @@ mod tests {
     }
 
     #[test]
-    fn the_docs_exist() {
+    fn the_packed_files_exist() {
         let root = workspace_root().unwrap();
+        assert!(root.join(ICON_PNG).is_file(), "{ICON_PNG} is missing");
         for doc in DOCS {
             assert!(root.join(doc).is_file(), "{doc} is missing");
         }

@@ -112,6 +112,11 @@ zip, macOS gets `MicroCut.app` (both architectures merged with `lipo`, `Info.pli
 macOS Finder has a minimal `PATH`, so the backend also looks in the Homebrew and MacPorts folders
 (`crates/media/src/locate.rs`).
 
+The icon is original artwork drawn by `apps/microcut/assets/make_icon.py` (Pillow), which writes `icon.png` (1024 px)
+and `icon.ico`; both are committed. The window gets `icon.png` at run time, `apps/microcut/build.rs` puts `icon.ico`
+and the version information into the Windows exe (`winresource`, the SDK's `rc.exe`; without it the build only warns),
+and `cargo xtask dist` turns `icon.png` into the bundle's `MicroCut.icns` (`sips`, `iconutil`).
+
 GitHub Actions: `.github/workflows/ci.yml` runs `cargo xtask ci` on Windows, macOS and Ubuntu 24.04 with FFmpeg
 installed (pushes to `main`, pull requests). `.github/workflows/release.yml` runs on a tag `v<version>`: it checks the
 tag against the version in `Cargo.toml`, runs the CI workflow, builds the three archives (Linux on Ubuntu 22.04 for an

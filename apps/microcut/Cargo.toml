@@ -14,5 +14,8 @@ microcut-media.workspace = true
 microcut-time.workspace = true
 rfd.workspace = true
 
+[target.'cfg(windows)'.build-dependencies]
+winresource.workspace = true
+
 [lints]
 workspace = true

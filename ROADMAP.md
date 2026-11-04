@@ -94,7 +94,7 @@ FFmpeg is not shipped: users install it themselves (see `NOTICE`).
   macOS (apps started from the Finder do not get the shell's `PATH`)
 - [x] M6.2 GitHub Actions: `ci.yml` (quality gates on Windows, macOS and Linux for pushes and pull requests),
   `release.yml` (a tag `v*` builds the three archives, adds `SHA256SUMS.txt` and opens a draft release)
-- [ ] M6.3 App icon: original artwork, in the window, the Windows exe and the macOS bundle
+- [x] M6.3 App icon: original artwork, in the window, the Windows exe and the macOS bundle
 
 ## Later
 
