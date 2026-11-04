@@ -134,11 +134,25 @@ pub fn snap_boundary(view: &View, rate: FrameRate, min_label_px: f64, pos: f64) 
     if unit_ms * num < 1000 * den {
         return unsnapped;
     }
+    snap_to_unit(view, rate, unit_ms, pos).unwrap_or(unsnapped)
+}
+
+/// The frame boundary nearest to boundary position `pos`, snapped to whole seconds since the
+/// start of the clip, whatever the zoom (Ctrl while dragging a range handle or the cursor).
+pub fn snap_boundary_to_seconds(view: &View, rate: FrameRate, pos: f64) -> i64 {
+    let unsnapped = pos.round().clamp(0.0, view.end()) as i64;
+    snap_to_unit(view, rate, 1000, pos).unwrap_or(unsnapped)
+}
+
+/// The frame boundary nearest to the multiple of `unit_ms` nearest to boundary position `pos`,
+/// within `0 ..= view.end()`; `None` for positions that are not numbers.
+fn snap_to_unit(view: &View, rate: FrameRate, unit_ms: i128, pos: f64) -> Option<i64> {
+    let (num, den) = (i128::from(rate.num()), i128::from(rate.den()));
     let fps = f64::from(rate.num()) / f64::from(rate.den());
     let ms = pos / fps * 1000.0;
-    let marks = (ms / unit_ms as f64).round();
+    let marks = (ms / unit_ms.max(1) as f64).round();
     if !marks.is_finite() {
-        return unsnapped;
+        return None;
     }
     // Mark time in ms → nearest frame boundary, exactly: frames = ms · num / (1000 · den).
     let mark_ms = (marks as i128).saturating_mul(unit_ms);
@@ -146,7 +160,7 @@ pub fn snap_boundary(view: &View, rate: FrameRate, min_label_px: f64, pos: f64) 
     let divisor = 1000 * den;
     let frame = (scaled + divisor / 2).div_euclid(divisor);
     let end = view.end() as i128;
-    i64::try_from(frame.clamp(0, end)).unwrap_or(unsnapped)
+    i64::try_from(frame.clamp(0, end)).ok()
 }
 
 /// Marks for the frame scale: frame numbers at the start of each labelled frame.
@@ -286,6 +300,29 @@ mod tests {
         assert_eq!(snap_boundary(&v, rate, 80.0, 88.0), 90);
         // 100 s = 2997.0 frames exactly.
         assert_eq!(snap_boundary(&v, rate, 80.0, 2990.0), 2997);
+    }
+
+    #[test]
+    fn ctrl_snaps_to_whole_seconds_at_any_zoom() {
+        let rate = FrameRate::new(60, 1).unwrap();
+        // Zoomed out (scale marks every 2 s): Shift → 4 s, whole seconds → 3 s.
+        let v = view(3600, 600.0);
+        assert_eq!(snap_boundary(&v, rate, 80.0, 185.0), 240);
+        assert_eq!(snap_boundary_to_seconds(&v, rate, 185.0), 180);
+        // Zoomed in (marks every few ms): still whole seconds.
+        let mut deep = view(6000, 1000.0);
+        deep.zoom_at(0.0, 1e-9);
+        assert_eq!(snap_boundary_to_seconds(&deep, rate, 89.0), 60);
+        assert_eq!(snap_boundary_to_seconds(&deep, rate, 91.0), 120);
+        // NTSC: 1 s = 29.97 frames → boundary 30; 100 s = 2997 exactly.
+        let ntsc = FrameRate::new(30_000, 1_001).unwrap();
+        let v = view(10_000, 10_000.0);
+        assert_eq!(snap_boundary_to_seconds(&v, ntsc, 31.0), 30);
+        assert_eq!(snap_boundary_to_seconds(&v, ntsc, 2990.0), 2997);
+        // Clamped to the clip; nonsense stays inside.
+        assert_eq!(snap_boundary_to_seconds(&v, ntsc, 1e12), 10_000);
+        assert_eq!(snap_boundary_to_seconds(&v, ntsc, -50.0), 0);
+        assert_eq!(snap_boundary_to_seconds(&v, ntsc, f64::NAN), 0);
     }
 
     #[test]

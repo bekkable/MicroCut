@@ -4,9 +4,9 @@
 //!
 //! Mouse: wheel zooms around the pointer, Shift+wheel (or a horizontal wheel/touchpad) scrolls,
 //! dragging the strip or a scale moves the view, a click sets the cursor, dragging near the
-//! cursor line moves the cursor (Shift: to the frame at the nearest mark), dragging a range
-//! handle on the frame scale moves that end of the range (Shift: snapped to the time scale's
-//! marks), an arrow at the edge of the frame scale (shown when a range end is scrolled out of
+//! cursor line moves the cursor, dragging a range handle on the frame scale moves that end of
+//! the range (both snap: Shift to the time scale's marks, Ctrl/Cmd to whole seconds; absolute,
+//! counted from the start of the clip), an arrow at the edge of the frame scale (shown when a range end is scrolled out of
 //! view) brings that end to the edge of the view on a click and takes hold of it on a drag, the
 //! scrollbar thumb can be dragged, double-click on the time scale or the scrollbar zooms out to
 //! the whole clip.
@@ -15,7 +15,8 @@ use std::sync::Arc;
 
 use eframe::egui::{self, Color32, CursorIcon, FontId, Pos2, Rect, Sense, Stroke, Vec2};
 use microcut_engine::{
-    RangeEnd, Session, Side, Tile, frame_marks, snap_boundary, tiles, time_marks,
+    RangeEnd, Session, Side, Tile, frame_marks, snap_boundary, snap_boundary_to_seconds, tiles,
+    time_marks,
 };
 use microcut_media::MediaInfo;
 
@@ -236,19 +237,37 @@ fn drag_x(ui: &egui::Ui, pos: Pos2, rows: &Rows, session: &mut Session) -> f64 {
     x.clamp(0.0, width)
 }
 
-/// The frame boundary at view x `x`; with Shift snapped to the marks of the time scale
-/// (seconds etc., depending on zoom; absolute, counted from the start of the clip).
+/// How a drag snaps, from the keys held.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Snap {
+    /// To the frame under the pointer.
+    Off,
+    /// Shift: to the marks of the time scale (their spacing depends on the zoom).
+    Marks,
+    /// Ctrl (Cmd on macOS): to whole seconds, whatever the zoom. Wins over Shift.
+    Seconds,
+}
+
+fn snap_mode(ui: &egui::Ui) -> Snap {
+    let modifiers = ui.input(|i| i.modifiers);
+    if modifiers.command {
+        Snap::Seconds
+    } else if modifiers.shift {
+        Snap::Marks
+    } else {
+        Snap::Off
+    }
+}
+
+/// The frame boundary at view x `x`, snapped as the held keys say (absolute, counted from the
+/// start of the clip).
 fn boundary_at(ui: &egui::Ui, x: f64, session: &Session) -> i64 {
     let view = session.view();
-    if ui.input(|i| i.modifiers.shift) {
-        snap_boundary(
-            view,
-            session.frame_rate(),
-            MIN_LABEL_SPACING,
-            view.pos_at(x),
-        )
-    } else {
-        view.boundary_at(x)
+    let rate = session.frame_rate();
+    match snap_mode(ui) {
+        Snap::Off => view.boundary_at(x),
+        Snap::Marks => snap_boundary(view, rate, MIN_LABEL_SPACING, view.pos_at(x)),
+        Snap::Seconds => snap_boundary_to_seconds(view, rate, view.pos_at(x)),
     }
 }
 
@@ -272,11 +291,11 @@ fn apply_drag(
         Drag::Cursor => {
             ui.ctx().set_cursor_icon(CursorIcon::ResizeHorizontal);
             let x = drag_x(ui, pos, rows, session);
-            // The frame under the pointer; with Shift the frame starting at the nearest mark.
-            let frame = if ui.input(|i| i.modifiers.shift) {
-                boundary_at(ui, x, session)
-            } else {
-                session.view().frame_at(x)
+            // The frame under the pointer; snapped: the frame starting at the nearest mark or
+            // whole second.
+            let frame = match snap_mode(ui) {
+                Snap::Off => session.view().frame_at(x),
+                Snap::Marks | Snap::Seconds => boundary_at(ui, x, session),
             };
             session.set_cursor(frame);
         }

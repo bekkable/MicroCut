@@ -127,6 +127,8 @@ FFmpeg is not shipped: users install it themselves (see `NOTICE`).
   least 16 frames remain on either side, else it is centred on the cursor again and only the new frames are
   decoded. Configured in `config.json` (`frame_buffer.frames_each_way`, `max_megabytes`; path in the About dialog);
   nothing is decoded during playback or while dragging the timeline
+- [x] M7.5 Ctrl (Cmd on macOS) while dragging a range handle or the cursor snaps to whole seconds since the start of
+  the clip, whatever the zoom (Shift keeps snapping to the time scale's marks; Ctrl wins if both are held)
 
 ## Later
 
