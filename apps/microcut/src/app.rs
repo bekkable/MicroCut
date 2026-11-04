@@ -9,7 +9,9 @@ use microcut_media::{Encoders, FfmpegBackend, MediaBackend, MediaInfo};
 use microcut_time::{ClockStamp, FrameRate};
 
 use crate::about::AboutDialog;
+use crate::config::Config;
 use crate::export::{Choices, ExportDialog, Outcome};
+use crate::framebuffer::FrameBuffer;
 use crate::loader::ProbeJob;
 use crate::playback::{Playback, Step, stop_frame};
 use crate::preview::Preview;
@@ -56,7 +58,11 @@ pub struct MicroCutApp {
     ffmpeg: Result<Arc<FfmpegBackend>, String>,
     /// The open About dialog.
     about: Option<AboutDialog>,
+    /// Where `config.json` is, and why it could not be used (both shown in the About dialog).
+    config_file: (Option<PathBuf>, Option<String>),
     preview: Option<Preview>,
+    /// Decoded frames around the paused cursor.
+    buffer: Option<FrameBuffer>,
     thumbs: Option<Thumbnails>,
     timeline: Timeline,
     transport: Transport,
@@ -115,11 +121,18 @@ impl MicroCutApp {
             .ok()
             .map(|b| Preview::new(Arc::clone(b), ctx.clone()));
         let thumbs = backend.as_ref().ok().map(|b| Thumbnails::new(b, ctx));
+        let (config, config_path, config_note) = Config::load();
+        let buffer = backend
+            .as_ref()
+            .ok()
+            .map(|b| FrameBuffer::new(Arc::clone(b), ctx.clone(), config.frame_buffer));
         let mut app = MicroCutApp {
             backend,
             ffmpeg,
             about: None,
+            config_file: (config_path, config_note),
             preview,
+            buffer,
             thumbs,
             timeline: Timeline::default(),
             transport: Transport::default(),
@@ -191,6 +204,9 @@ impl MicroCutApp {
                 if let Some(thumbs) = &mut self.thumbs {
                     thumbs.reset();
                 }
+                if let Some(buffer) = &mut self.buffer {
+                    buffer.reset();
+                }
                 self.timeline = Timeline::default();
                 (
                     format!("MicroCut — {}", info.file_name()),
@@ -253,7 +269,12 @@ impl MicroCutApp {
 
     fn open_about(&mut self) {
         let ffmpeg = self.ffmpeg.as_ref().map_err(String::as_str);
-        self.about = Some(AboutDialog::new(&self.ctx, ffmpeg));
+        let (path, note) = &self.config_file;
+        self.about = Some(AboutDialog::new(
+            &self.ctx,
+            ffmpeg,
+            (path.as_deref(), note.as_deref()),
+        ));
     }
 
     fn handle_input(&mut self, ui: &mut egui::Ui) {
@@ -414,6 +435,30 @@ impl MicroCutApp {
         }
     }
 
+    /// Keeps the frame buffer around the paused cursor and shows the cursor's frame from it
+    /// when it has it (no decode, no wait). Playback shows its own pictures.
+    fn serve_from_buffer(&mut self) {
+        let (Some(buffer), Some(preview), Document::Loaded(session)) =
+            (&mut self.buffer, &mut self.preview, &self.document)
+        else {
+            return;
+        };
+        let paused = !self.transport.is_playing();
+        let cursor = session.cursor();
+        buffer.update(
+            session.media(),
+            (cursor, session.last_frame()),
+            preview.size(),
+            paused && !self.timeline.is_dragging(),
+        );
+        if paused
+            && !preview.showing(cursor)
+            && let Some(picture) = buffer.get(cursor)
+        {
+            preview.present(&self.ctx, cursor, picture);
+        }
+    }
+
     fn toolbar(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
             let open = ui
@@ -547,6 +592,7 @@ impl eframe::App for MicroCutApp {
         }
         // After the timeline (which may move the cursor), before the preview is drawn.
         self.step_playback();
+        self.serve_from_buffer();
         let preview_clicked = egui::CentralPanel::default()
             .frame(egui::Frame::central_panel(ui.style()).inner_margin(0.0))
             .show(ui, |ui| {

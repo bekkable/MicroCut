@@ -101,6 +101,14 @@ impl Preview {
         self.error = None;
     }
 
+    /// Whether frame `frame` at the current size is what the pane shows (or a picture for it
+    /// was handed over with [`Preview::present`]).
+    pub fn showing(&self, frame: i64) -> bool {
+        self.shown.is_some_and(|key| {
+            key.generation == self.generation && key.frame == frame && key.size == self.size
+        })
+    }
+
     /// Whether a requested picture has not arrived yet.
     pub fn is_busy(&self) -> bool {
         self.worker_alive && self.requested.is_some() && self.requested != self.shown

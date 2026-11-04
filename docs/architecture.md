@@ -61,6 +61,19 @@ that each new request overwrites. Thumbnails (`apps/microcut/src/thumbs.rs`) use
 replaces with the currently visible, not yet decoded frames on every repaint, so zooming and scrolling never leave a
 backlog of invisible work.
 
+While paused, a frame buffer (`apps/microcut/src/framebuffer.rs`) keeps the frames around the cursor decoded, so
+stepping frame by frame needs no decode: the preview shows the buffered picture at once. Which frames is
+`microcut_engine::BufferWindow`: `radius` frames to either side (32 by default, `config.json`, fewer if the pictures
+would take more than `max_megabytes`), left in place while at least `radius / 2` remain on either side of the cursor,
+otherwise centred on the cursor again, keeping the shared frames. One worker decodes each missing run with one
+`video_stream` (one seek, then frame after frame — the same pictures as `decode_frame`, a test compares them), nearest
+to the cursor first; a newer request stops the running one. During playback and while the timeline is dragged nothing
+new is decoded.
+
+`config.json` (`apps/microcut/src/config.rs`) holds what the user may tune by hand; it lives next to eframe's saved
+state, is written with the defaults when missing and read leniently (bad values fall back to their defaults). The About
+dialog shows its path.
+
 Playback (`apps/microcut/src/playback.rs`) reads two ffmpeg streams (`MediaBackend::video_stream` /
 `audio_stream`, `crates/media/src/stream.rs`) on two worker threads: pictures go through a channel of six (the
 decoder blocks when it is ahead), samples into a one-second queue that the `cpal` device callback empties

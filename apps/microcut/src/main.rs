@@ -6,8 +6,10 @@
 mod about;
 mod app;
 mod audio;
+mod config;
 mod crash;
 mod export;
+mod framebuffer;
 mod loader;
 mod playback;
 mod preview;

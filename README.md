@@ -54,6 +54,19 @@ The downloads are not signed with a Windows or Apple certificate. Windows SmartS
 anyway". macOS blocks the first start: open System Settings → Privacy & Security and click "Open Anyway" (or run
 `xattr -dr com.apple.quarantine MicroCut.app`).
 
+## Settings
+
+While paused, MicroCut keeps the 32 frames before and after the cursor decoded, so stepping frame by frame is
+instant. To change that, edit `config.json` (its path is shown under About; `%APPDATA%\microcut\data` on Windows,
+`~/Library/Application Support/microcut` on macOS, `~/.local/share/microcut` on Linux) and restart MicroCut:
+
+```json
+{ "frame_buffer": { "frames_each_way": 32, "max_megabytes": 1024 } }
+```
+
+`frames_each_way: 0` turns the buffer off; with large pictures it keeps fewer frames so as to stay within
+`max_megabytes`.
+
 ## Build and run
 
 ```sh

@@ -1719,6 +1719,8 @@ dependencies = [
  "microcut-media",
  "microcut-time",
  "rfd",
+ "serde",
+ "serde_json",
  "winresource",
 ]
 

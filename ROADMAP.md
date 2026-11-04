@@ -122,8 +122,11 @@ FFmpeg is not shipped: users install it themselves (see `NOTICE`).
   strip the pointer becomes a horizontal-move cursor, and a drag moves the cursor instead of the view (Shift: to the
   frame at the nearest mark; past the ends the view scrolls; range handles win on the frame scale; playback pauses
   during the drag and continues from the new place)
-- [ ] M7.4 Frame buffer while paused: the frames around the cursor are decoded in the background, so stepping
-  frame by frame shows them at once
+- [x] M7.4 Frame buffer while paused: the 32 frames before and after the cursor are decoded in the background
+  (one ffmpeg stream per missing run), so stepping frame by frame shows them at once. The window stays while at
+  least 16 frames remain on either side, else it is centred on the cursor again and only the new frames are
+  decoded. Configured in `config.json` (`frame_buffer.frames_each_way`, `max_megabytes`; path in the About dialog);
+  nothing is decoded during playback or while dragging the timeline
 
 ## Later
 

@@ -14,6 +14,8 @@ microcut-engine.workspace = true
 microcut-media.workspace = true
 microcut-time.workspace = true
 rfd.workspace = true
+serde.workspace = true
+serde_json.workspace = true
 
 [target.'cfg(windows)'.build-dependencies]
 winresource.workspace = true

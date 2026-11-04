@@ -2,6 +2,7 @@
 //! project. FFmpeg's version is read on a worker thread (it may run `ffmpeg -version`).
 
 use std::panic::{self, AssertUnwindSafe};
+use std::path::Path;
 use std::sync::Arc;
 use std::sync::mpsc::{self, Receiver, TryRecvError};
 use std::thread;
@@ -34,6 +35,8 @@ enum Ffmpeg {
 pub struct AboutDialog {
     icon: Option<egui::TextureHandle>,
     ffmpeg: Ffmpeg,
+    /// Where `config.json` is, and why it could not be used.
+    config: (Option<String>, Option<String>),
     /// Why the project page could not be opened.
     note: Option<String>,
     /// Set after the first frame: the Enter that opened the dialog must not also close it.
@@ -41,8 +44,12 @@ pub struct AboutDialog {
 }
 
 impl AboutDialog {
-    /// A dialog describing `ffmpeg` (or why it is missing).
-    pub fn new(ctx: &egui::Context, ffmpeg: Result<&Arc<FfmpegBackend>, &str>) -> AboutDialog {
+    /// A dialog describing `ffmpeg` (or why it is missing) and the config file.
+    pub fn new(
+        ctx: &egui::Context,
+        ffmpeg: Result<&Arc<FfmpegBackend>, &str>,
+        (config_path, config_note): (Option<&Path>, Option<&str>),
+    ) -> AboutDialog {
         let ffmpeg = match ffmpeg {
             Err(why) => Ffmpeg::Missing(why.to_owned()),
             Ok(backend) => Ffmpeg::Found {
@@ -54,6 +61,10 @@ impl AboutDialog {
         AboutDialog {
             icon: icon_texture(ctx),
             ffmpeg,
+            config: (
+                config_path.map(|p| p.display().to_string()),
+                config_note.map(str::to_owned),
+            ),
             note: None,
             armed: false,
         }
@@ -136,6 +147,18 @@ impl AboutDialog {
                     }
                 });
                 ui.end_row();
+
+                if let (Some(path), note) = &self.config {
+                    ui.weak("Settings");
+                    ui.vertical(|ui| {
+                        ui.add(egui::Label::new(path).truncate())
+                            .on_hover_text("Edit by hand; read when MicroCut starts.");
+                        if let Some(note) = note {
+                            ui.colored_label(ui.visuals().error_fg_color, note);
+                        }
+                    });
+                    ui.end_row();
+                }
             });
         ui.add_space(6.0);
         ui.weak(
