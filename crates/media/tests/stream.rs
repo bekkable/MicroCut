@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use microcut_media::{AudioFormat, FfmpegBackend, MediaBackend, MediaError, VideoFrame};
+use microcut_time::Tick;
 
 /// 64×48 gray video whose frame N has luma 16 + 3·N (as in `decode.rs`), no audio.
 fn numbered_clip(backend: &FfmpegBackend, fps: u32, ext: &str) -> PathBuf {
@@ -132,6 +133,50 @@ fn audio_stream_delivers_the_requested_span() {
     assert!(rms(&samples) > 0.05, "tone expected, rms {}", rms(&samples));
 }
 
+#[test]
+fn audio_sync_shifts_the_sound() {
+    let Some(backend) = common::backend() else {
+        return;
+    };
+    let media = backend
+        .probe(&common::tone_after_one_second(&backend))
+        .unwrap();
+    let format = AudioFormat {
+        sample_rate: 48_000,
+        channels: 2,
+    };
+    let ms = Tick::from_millis;
+    // (first frame, delay in ms, where the tone starts in the stream, in s). The source's tone
+    // starts at 1 s; frame 10 starts at 0.4 s.
+    let cases = [
+        (0, 0, 1.0),
+        (0, 200, 1.2),    // later: silence first
+        (0, -300, 0.7),   // earlier
+        (10, 200, 0.8),   // later, from 0.2 s of the source
+        (10, 600, 1.2),   // 0.2 s of silence, then the source from its start
+        (10, -250, 0.35), // earlier, from 0.65 s of the source
+    ];
+    for (from, delay, onset) in cases {
+        let samples = read_delayed(&backend, &media, 0, (from, 40), ms(delay), format);
+        let got = common::onset_secs(&samples);
+        assert!(
+            (got - onset).abs() < 0.002,
+            "from {from}, delay {delay} ms: tone at {got} s, expected {onset} s"
+        );
+        // Always the requested duration (1.6 s), as long as the source lasts.
+        let secs = samples.len() as f64 / 2.0 / 48_000.0;
+        let expected = if delay < 0 {
+            (2.0 - 0.04 * from as f64 + delay as f64 / 1000.0).min(1.6)
+        } else {
+            1.6
+        };
+        assert!(
+            (secs - expected).abs() < 0.005,
+            "from {from}, delay {delay} ms: {secs} s of sound, expected {expected} s"
+        );
+    }
+}
+
 /// 2 s of 25 fps video with two titled audio tracks: 0 = "Tone" (440 Hz), 1 = "Silence".
 fn clip_with_two_tracks(backend: &FfmpegBackend) -> PathBuf {
     common::generate(
@@ -192,7 +237,7 @@ fn audio_tracks_are_listed_and_played_separately() {
     );
 
     let err = backend
-        .audio_stream(&media, 2, 0, 25, format)
+        .audio_stream(&media, 2, (0, 25), Tick::ZERO, format)
         .err()
         .unwrap();
     assert!(matches!(err, MediaError::NoAudioStream), "{err:?}");
@@ -206,8 +251,20 @@ fn read_all(
     (from, count): (i64, i64),
     format: AudioFormat,
 ) -> Vec<f32> {
+    read_delayed(backend, media, track, (from, count), Tick::ZERO, format)
+}
+
+/// Like [`read_all`], with audio sync `delay`.
+fn read_delayed(
+    backend: &FfmpegBackend,
+    media: &microcut_media::MediaInfo,
+    track: usize,
+    (from, count): (i64, i64),
+    delay: Tick,
+    format: AudioFormat,
+) -> Vec<f32> {
     let mut stream = backend
-        .audio_stream(media, track, from, count, format)
+        .audio_stream(media, track, (from, count), delay, format)
         .unwrap();
     let mut samples = Vec::new();
     let mut buf = vec![0.0; 4096];
@@ -239,7 +296,7 @@ fn audio_stream_rejects_bad_requests() {
         channels: 2,
     };
     let err = backend
-        .audio_stream(&silent, 0, 0, 25, format)
+        .audio_stream(&silent, 0, (0, 25), Tick::ZERO, format)
         .err()
         .unwrap();
     assert!(matches!(err, MediaError::NoAudioStream), "{err:?}");
@@ -249,6 +306,9 @@ fn audio_stream_rejects_bad_requests() {
         sample_rate: 0,
         channels: 2,
     };
-    let err = backend.audio_stream(&media, 0, 0, 25, zero).err().unwrap();
+    let err = backend
+        .audio_stream(&media, 0, (0, 25), Tick::ZERO, zero)
+        .err()
+        .unwrap();
     assert!(matches!(err, MediaError::BadAudioFormat { .. }), "{err:?}");
 }

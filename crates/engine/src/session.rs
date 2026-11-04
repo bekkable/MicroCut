@@ -70,7 +70,12 @@ pub struct Session {
     view: View,
     /// Index into `media.audio`; 0 when there is no audio.
     audio_track: usize,
+    /// Audio sync in milliseconds, within ±[`MAX_AUDIO_DELAY_MS`].
+    audio_delay_ms: i32,
 }
+
+/// Largest audio sync either way, in milliseconds.
+pub const MAX_AUDIO_DELAY_MS: i32 = 10_000;
 
 impl Session {
     /// A fresh session: cursor on the first frame, the whole clip selected, zoomed to fit,
@@ -87,7 +92,27 @@ impl Session {
             },
             view,
             audio_track: 0,
+            audio_delay_ms: 0,
         }
+    }
+
+    /// Audio sync in milliseconds: how much later the sound plays than recorded (negative:
+    /// earlier). Applies to playback and export.
+    pub fn audio_delay_ms(&self) -> i32 {
+        self.audio_delay_ms
+    }
+
+    /// The audio sync as a time.
+    pub fn audio_delay(&self) -> Tick {
+        Tick::from_millis(i64::from(self.audio_delay_ms))
+    }
+
+    /// Sets the audio sync, clamped to ±[`MAX_AUDIO_DELAY_MS`]. Returns whether it changed.
+    pub fn set_audio_delay_ms(&mut self, ms: i32) -> bool {
+        let ms = ms.clamp(-MAX_AUDIO_DELAY_MS, MAX_AUDIO_DELAY_MS);
+        let changed = ms != self.audio_delay_ms;
+        self.audio_delay_ms = ms;
+        changed
     }
 
     /// The selected audio track (index into the media's audio tracks), if there is audio.
@@ -293,6 +318,19 @@ mod tests {
         assert!(!s.set_audio_track(1), "already selected");
         assert!(!s.set_audio_track(2), "no such track");
         assert_eq!(s.audio_track(), Some(1));
+    }
+
+    #[test]
+    fn audio_sync_is_clamped() {
+        let mut s = session(10, 25);
+        assert_eq!(s.audio_delay_ms(), 0);
+        assert!(s.set_audio_delay_ms(-150));
+        assert!(!s.set_audio_delay_ms(-150), "unchanged");
+        assert_eq!(s.audio_delay(), Tick::from_millis(-150));
+        assert!(s.set_audio_delay_ms(i32::MAX));
+        assert_eq!(s.audio_delay_ms(), MAX_AUDIO_DELAY_MS);
+        s.set_audio_delay_ms(i32::MIN);
+        assert_eq!(s.audio_delay_ms(), -MAX_AUDIO_DELAY_MS);
     }
 
     #[test]

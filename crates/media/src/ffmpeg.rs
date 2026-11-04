@@ -6,7 +6,7 @@ use std::io;
 use std::path::{self, Path, PathBuf};
 use std::time::Duration;
 
-use microcut_time::DecimalSecs;
+use microcut_time::{DecimalSecs, TICKS_PER_SECOND, Tick};
 
 use crate::export::ProgressParser;
 use crate::frame::{self, fit_within, rgba_len};
@@ -200,8 +200,8 @@ impl MediaBackend for FfmpegBackend {
         &self,
         media: &MediaInfo,
         track: usize,
-        from: i64,
-        count: i64,
+        (from, count): (i64, i64),
+        delay: Tick,
         format: AudioFormat,
     ) -> Result<Box<dyn AudioStream>, MediaError> {
         if track >= media.audio.len() {
@@ -222,32 +222,40 @@ impl MediaBackend for FfmpegBackend {
         let from = frame::clamp_frame(media, from);
         let start = rate.frame_to_tick(from);
         let end = rate.frame_to_tick(from.saturating_add(count.max(0)));
-        let start_arg = DecimalSecs(start).to_string();
+        let (seek, silence) = audio_source(start, delay);
         let duration_arg = DecimalSecs(end.saturating_sub(start)).to_string();
         let (channels_arg, rate_arg) = (channels.to_string(), sample_rate.to_string());
         // Audio seeks are sample-exact: ffmpeg decodes from before `-ss` and trims.
-        let args = [
-            OsStr::new("-v"),
-            OsStr::new("error"),
-            OsStr::new("-nostdin"),
-            OsStr::new("-ss"),
-            OsStr::new(&start_arg),
-            OsStr::new("-i"),
-            media.path.as_os_str(),
-            OsStr::new("-map"),
-            OsStr::new(&map_arg),
-            OsStr::new("-vn"),
-            OsStr::new("-t"),
-            OsStr::new(&duration_arg),
-            OsStr::new("-ac"),
-            OsStr::new(&channels_arg),
-            OsStr::new("-ar"),
-            OsStr::new(&rate_arg),
-            OsStr::new("-f"),
-            OsStr::new("f32le"),
-            OsStr::new("pipe:1"),
+        let mut args: Vec<OsString> = vec![
+            "-v".into(),
+            "error".into(),
+            "-nostdin".into(),
+            "-ss".into(),
+            DecimalSecs(seek).to_string().into(),
+            "-i".into(),
+            media.path.clone().into_os_string(),
+            "-map".into(),
+            map_arg.into(),
+            "-vn".into(),
         ];
-        let process = Streaming::spawn("ffmpeg", &self.ffmpeg, args, stream::MAX_STDERR)?;
+        if let Some(filter) = lead_silence_filter(silence) {
+            args.extend(["-af".into(), filter.into()]);
+        }
+        args.extend(
+            [
+                "-t",
+                &duration_arg,
+                "-ac",
+                &channels_arg,
+                "-ar",
+                &rate_arg,
+                "-f",
+                "f32le",
+                "pipe:1",
+            ]
+            .map(OsString::from),
+        );
+        let process = Streaming::spawn("ffmpeg", &self.ffmpeg, &args, stream::MAX_STDERR)?;
         Ok(Box::new(FfmpegAudioStream {
             process,
             path: media.path.clone(),
@@ -403,8 +411,11 @@ fn export_args(media: &MediaInfo, job: &ExportJob) -> Result<Vec<OsString>, Medi
     }
     push(&["-ss", &video_seek, "-i"]);
     args.push(media.path.clone().into_os_string());
-    if job.audio.is_some() {
-        let audio_seek = DecimalSecs(start).to_string();
+    let mut lead_silence = None;
+    if let Some(audio) = &job.audio {
+        let (seek, silence) = audio_source(start, audio.delay);
+        lead_silence = lead_silence_filter(silence);
+        let audio_seek = DecimalSecs(seek).to_string();
         args.extend(["-ss".into(), audio_seek.into(), "-i".into()]);
         args.push(media.path.clone().into_os_string());
     }
@@ -453,6 +464,9 @@ fn export_args(media: &MediaInfo, job: &ExportJob) -> Result<Vec<OsString>, Medi
         let map = format!("1:a:{}", audio.track);
         let kbps = format!("{}k", audio.kbps);
         push(&["-map", &map, "-c:a", audio.codec.encoder(), "-b:a", &kbps]);
+        if let Some(filter) = &lead_silence {
+            push(&["-af", filter]);
+        }
     }
     let frames = count.to_string();
     let duration = DecimalSecs(duration).to_string();
@@ -471,6 +485,32 @@ fn export_args(media: &MediaInfo, job: &ExportJob) -> Result<Vec<OsString>, Medi
     Ok(args)
 }
 
+/// Where the sound for a stream starting at `start` comes from with audio sync `delay`: the
+/// source time to seek to and the silence to play before it (when the delay reaches back before
+/// the start of the source).
+fn audio_source(start: Tick, delay: Tick) -> (Tick, Tick) {
+    let source = start.saturating_sub(delay);
+    if source < Tick::ZERO {
+        (Tick::ZERO, Tick::ZERO.saturating_sub(source))
+    } else {
+        (source, Tick::ZERO)
+    }
+}
+
+/// The ffmpeg audio filter that plays `silence` before the sound (`adelay`, in milliseconds
+/// with microsecond precision, on every channel); `None` without silence.
+fn lead_silence_filter(silence: Tick) -> Option<String> {
+    if silence <= Tick::ZERO {
+        return None;
+    }
+    let micros = silence.0 / (TICKS_PER_SECOND / 1_000_000);
+    Some(format!(
+        "adelay=delays={}.{:03}:all=1",
+        micros / 1000,
+        micros % 1000
+    ))
+}
+
 /// Error from the last stderr line. ffmpeg tools prefix errors with the input path, which the UI
 /// already shows, so that prefix is removed.
 pub(crate) fn tool_failed(tool: &'static str, path: &Path, stderr: &[u8]) -> MediaError {
@@ -478,4 +518,44 @@ pub(crate) fn tool_failed(tool: &'static str, path: &Path, stderr: &[u8]) -> Med
     let prefix = format!("{}: ", path.display());
     let message = line.strip_prefix(&prefix).unwrap_or(&line).to_owned();
     MediaError::ToolFailed { tool, message }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn ms(n: i64) -> Tick {
+        Tick::from_millis(n)
+    }
+
+    #[test]
+    fn audio_sync_moves_the_source_or_adds_silence() {
+        // Sound later: from earlier in the source.
+        assert_eq!(audio_source(ms(5000), ms(150)), (ms(4850), Tick::ZERO));
+        // Sound earlier: from later in the source.
+        assert_eq!(audio_source(ms(5000), ms(-150)), (ms(5150), Tick::ZERO));
+        // Before the start of the source: silence first.
+        assert_eq!(audio_source(ms(100), ms(150)), (Tick::ZERO, ms(50)));
+        assert_eq!(audio_source(Tick::ZERO, ms(150)), (Tick::ZERO, ms(150)));
+        assert_eq!(audio_source(ms(100), Tick::ZERO), (ms(100), Tick::ZERO));
+        // Hostile values saturate.
+        assert_eq!(audio_source(Tick(i64::MAX), Tick(i64::MIN)).1, Tick::ZERO);
+        assert!(audio_source(Tick(i64::MIN), Tick(i64::MAX)).1 > Tick::ZERO);
+    }
+
+    #[test]
+    fn lead_silence_is_an_adelay_filter() {
+        assert_eq!(lead_silence_filter(Tick::ZERO), None);
+        assert_eq!(lead_silence_filter(ms(-5)), None);
+        assert_eq!(
+            lead_silence_filter(ms(150)).as_deref(),
+            Some("adelay=delays=150.000:all=1")
+        );
+        // A 60 fps frame start: 16.666 ms.
+        let frame = Tick(TICKS_PER_SECOND / 60);
+        assert_eq!(
+            lead_silence_filter(frame).as_deref(),
+            Some("adelay=delays=16.666:all=1")
+        );
+    }
 }

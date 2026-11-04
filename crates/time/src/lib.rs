@@ -25,6 +25,11 @@ impl Tick {
         Tick(secs.saturating_mul(TICKS_PER_SECOND))
     }
 
+    /// Whole milliseconds to ticks, saturating on overflow.
+    pub fn from_millis(ms: i64) -> Tick {
+        Tick(ms.saturating_mul(TICKS_PER_SECOND / 1000))
+    }
+
     /// Whole seconds, rounded towards zero.
     pub fn whole_secs(self) -> i64 {
         self.0 / TICKS_PER_SECOND
@@ -307,5 +312,15 @@ mod tests {
         let rate = FrameRate::new(1, 1_000).unwrap();
         assert_eq!(rate.frame_to_tick(i64::MAX), Tick(i64::MAX));
         assert_eq!(Tick::from_secs(i64::MIN), Tick(i64::MIN));
+        assert_eq!(Tick::from_millis(i64::MAX), Tick(i64::MAX));
+    }
+
+    #[test]
+    fn milliseconds() {
+        assert_eq!(Tick::from_millis(1000), Tick::from_secs(1));
+        assert_eq!(
+            Tick::from_millis(-150),
+            Tick::parse_decimal_secs("-0.15").unwrap()
+        );
     }
 }

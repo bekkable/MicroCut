@@ -18,9 +18,9 @@ use microcut_media::{
     AudioCodec, AudioExport, Encoders, ExportEnd, ExportJob, MediaBackend, MediaInfo, VideoCodec,
     VideoQuality,
 };
-use microcut_time::ClockStamp;
+use microcut_time::{ClockStamp, Tick};
 
-use crate::tracks;
+use crate::{sync, tracks};
 
 /// Codec choices, remembered from one export to the next.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -96,6 +96,8 @@ pub struct ExportDialog {
     choices: Choices,
     /// `None`: export without sound.
     track: Option<usize>,
+    /// Audio sync in milliseconds (shared with the status line, see [`ExportDialog::audio_delay_ms`]).
+    delay_ms: i32,
     /// The file name as typed.
     name: String,
     note: Option<Note>,
@@ -105,10 +107,11 @@ pub struct ExportDialog {
 }
 
 impl ExportDialog {
-    /// A dialog for `range` of `media`, starting from the `choices` of the last export.
+    /// A dialog for `range` of `media` with audio sync `delay_ms`, starting from the `choices`
+    /// of the last export.
     pub fn new(
         media: Arc<MediaInfo>,
-        range: FrameRange,
+        (range, delay_ms): (FrameRange, i32),
         encoders: Encoders,
         choices: Choices,
     ) -> Result<ExportDialog, String> {
@@ -132,6 +135,7 @@ impl ExportDialog {
             encoders,
             choices,
             track,
+            delay_ms,
             name,
             note: None,
             running: None,
@@ -142,6 +146,11 @@ impl ExportDialog {
     /// The codec choices, to start the next dialog with.
     pub fn choices(&self) -> Choices {
         self.choices
+    }
+
+    /// The audio sync as set in the dialog (it changes the one of the session too).
+    pub fn audio_delay_ms(&self) -> i32 {
+        self.delay_ms
     }
 
     /// The folder the export goes to: that of the video.
@@ -155,7 +164,7 @@ impl ExportDialog {
             return outcome;
         }
         let modal = egui::Modal::new(egui::Id::unique("export")).show(ctx, |ui| {
-            ui.set_width(480.0);
+            ui.set_width(560.0);
             ui.heading("Export");
             ui.add_space(8.0);
             let running = self.running.is_some();
@@ -256,16 +265,25 @@ impl ExportDialog {
                             .unwrap_or_default(),
                         None => "No audio".to_owned(),
                     };
-                    ui.add_enabled_ui(!self.encoders.audio.is_empty(), |ui| {
-                        egui::ComboBox::from_id_salt("audio track")
-                            .width(360.0)
-                            .selected_text(track_label(self.track))
-                            .show_ui(ui, |ui| {
-                                for track in (0..audio.len()).map(Some).chain([None]) {
-                                    let text = track_label(track);
-                                    ui.selectable_value(&mut self.track, track, text);
-                                }
-                            });
+                    ui.horizontal(|ui| {
+                        ui.add_enabled_ui(self.track.is_some(), |ui| {
+                            ui.weak("Sync");
+                            if let Some(edit) = sync::control(ui, self.delay_ms) {
+                                self.delay_ms = edit.ms;
+                            }
+                        });
+                        ui.add_space(4.0);
+                        ui.add_enabled_ui(!self.encoders.audio.is_empty(), |ui| {
+                            egui::ComboBox::from_id_salt("audio track")
+                                .width(ui.available_width().max(120.0))
+                                .selected_text(track_label(self.track))
+                                .show_ui(ui, |ui| {
+                                    for track in (0..audio.len()).map(Some).chain([None]) {
+                                        let text = track_label(track);
+                                        ui.selectable_value(&mut self.track, track, text);
+                                    }
+                                });
+                        });
                     });
                     if self.track.is_some() {
                         ui.horizontal(|ui| {
@@ -406,6 +424,7 @@ impl ExportDialog {
                 track,
                 codec: self.choices.audio,
                 kbps: self.choices.kbps,
+                delay: Tick::from_millis(i64::from(self.delay_ms)),
             }),
         };
         self.note = None;

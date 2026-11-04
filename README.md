@@ -6,7 +6,8 @@ overwritten.
 
 Status: **M5 — export.** Open a file (dialog, drag & drop or `microcut <video>`), find your way on the timeline,
 select the range to keep, play it with sound and export it frame-exactly as MP4 (H.264, H.265 or AV1; AAC or Opus;
-one audio track of your choice); the preview always shows the exact frame at the cursor. See
+one audio track of your choice, shifted to sync with the picture if needed); the preview always shows the exact frame
+at the cursor. See
 [`ROADMAP.md`](ROADMAP.md).
 
 | Input                                  | Action                                         |
@@ -26,6 +27,7 @@ one audio track of your choice); the preview always shows the exact frame at the
 | Ctrl+Home/End                          | First/last frame of the clip                   |
 | Speaker / wedge / wheel (status line)  | Mute, set volume                               |
 | `[0] [1] …` left of the speaker        | Choose the audio track (videos with several)   |
+| Sync `◀ [+0 ms] ▶` left of the tracks  | Audio sync: type ± milliseconds (+ = sound later) or ±50 ms per arrow; for playback and export |
 | Ctrl+O                                 | Open a video                                   |
 | Export…, E, Ctrl+E                     | Export the range (codecs, quality, audio track, file name; optionally on an NVIDIA graphics card) |
 

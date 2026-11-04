@@ -18,6 +18,6 @@ pub use export::{
     free_file_name,
 };
 pub use scale::{Mark, frame_marks, snap_boundary, time_marks};
-pub use session::{FrameRange, RangeEnd, Session, Side};
+pub use session::{FrameRange, MAX_AUDIO_DELAY_MS, RangeEnd, Session, Side};
 pub use tiles::{Tile, tiles};
 pub use view::{MAX_PX_PER_FRAME, View};

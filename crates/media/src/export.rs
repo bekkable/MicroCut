@@ -2,6 +2,8 @@
 
 use std::path::PathBuf;
 
+use microcut_time::Tick;
+
 /// Video codec of an export.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum VideoCodec {
@@ -162,6 +164,9 @@ pub struct AudioExport {
     pub codec: AudioCodec,
     /// Bit rate in kbit/s (8 to 1024).
     pub kbps: u32,
+    /// Audio sync: how much later the sound plays than in the source (negative: earlier); see
+    /// [`crate::MediaBackend::audio_stream`].
+    pub delay: Tick,
 }
 
 /// One export: frames `from .. from + count` of the media into `output` (MP4).

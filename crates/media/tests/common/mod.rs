@@ -54,3 +54,35 @@ pub fn generate(backend: &FfmpegBackend, name: &str, args: &[&str]) -> PathBuf {
     }
     path
 }
+
+/// 2 s of 25 fps video whose sound (48 kHz stereo PCM) is silent for exactly 1 s, then a 440 Hz
+/// tone: where the tone starts tells where the sound was taken from.
+pub fn tone_after_one_second(backend: &FfmpegBackend) -> PathBuf {
+    generate(
+        backend,
+        "tone_after_1s_25fps.mkv",
+        &[
+            "-f",
+            "lavfi",
+            "-i",
+            "testsrc2=s=64x48:r=25:d=2",
+            "-f",
+            "lavfi",
+            "-i",
+            r"aevalsrc=exprs=if(gte(t\,1)\,0.5*sin(2*PI*440*t)\,0):s=48000:c=stereo:d=2",
+            "-c:v",
+            "mpeg4",
+            "-c:a",
+            "pcm_s16le",
+        ],
+    )
+}
+
+/// Seconds into interleaved stereo `samples` (48 kHz) until the first loud sample; `-1` if
+/// there is none.
+pub fn onset_secs(samples: &[f32]) -> f64 {
+    match samples.iter().position(|s| s.abs() > 0.05) {
+        Some(first) => first as f64 / 2.0 / 48_000.0,
+        None => -1.0,
+    }
+}

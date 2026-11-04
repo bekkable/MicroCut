@@ -10,6 +10,7 @@ mod export;
 mod loader;
 mod playback;
 mod preview;
+mod sync;
 mod thumbs;
 mod timeline;
 mod tracks;

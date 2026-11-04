@@ -23,7 +23,7 @@ Nothing below L5 depends on egui/eframe/winit/rfd/cpal, so the engine and media 
 │            preview (frame at cursor)         │
 │                                              │
 ├──────────────────────────────────────────────┤
-│ ▶ 00:01:05 [Set start][Set end] …  [0][1] 🔈◢ │
+│ ▶ 00:01:05 [Set start][Set end] … Sync ◀ +0 ms ▶ [0][1] 🔈◢ │
 ├──────────────────────────────────────────────┤
 │◀frame scale ····|····[=====range=====]····  ▶│  ← arrows: range end out of view
 │ ▮▮▮▮▮▮▮▮▮▮▮ video strip (thumbnails) ▮▮▮▮▮▮▮ │  ← wheel zooms, drag scrolls
@@ -91,6 +91,12 @@ reference with exactly the same frames: a lossless (`-qp 0`) encode of the range
 (`settb=1/60,setpts=N` on both inputs) — comparing by timestamps mis-pairs frames of Matroska sources (1 ms
 timestamps) and drags even identical videos down to ~89.
 `crates/media/tests/export.rs` checks frame numbers, the audio track, every available codec, cancel and failure.
+
+Audio sync (`Session::audio_delay`, milliseconds in the UI) shifts the sound in playback and export alike
+(`MediaBackend::audio_stream` and `AudioExport::delay`): a stream starting at time `t` takes its sound from `t − delay`
+in the source; where that reaches back before the start of the source, `adelay` plays silence first. The picture
+stays frame-exact and the sound covers the same span (it ends early only where the source runs out);
+`tests/stream.rs` and `tests/export.rs` measure where a tone that starts at 1 s ends up.
 
 The frame count comes from the video stream's duration when the container has one (the container duration also covers
 longer audio), else from the container duration.

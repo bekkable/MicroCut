@@ -19,6 +19,8 @@ mod stream;
 
 use std::path::Path;
 
+use microcut_time::Tick;
+
 pub use error::MediaError;
 pub use export::{
     AudioCodec, AudioExport, Encoders, ExportEnd, ExportJob, VideoCodec, VideoQuality,
@@ -54,15 +56,19 @@ pub trait MediaBackend: Send + Sync {
         max_size: (u32, u32),
     ) -> Result<Box<dyn VideoStream>, MediaError>;
 
-    /// Decodes audio track `track` (index into [`MediaInfo::audio`]) from the start of frame
-    /// `from` for the duration of `count` frames, converted to `format` (interleaved `f32`
-    /// samples).
+    /// Decodes audio track `track` (index into [`MediaInfo::audio`]) for frames `span` =
+    /// `(from, count)`: from the start of frame `from` for the duration of `count` frames,
+    /// converted to `format` (interleaved `f32` samples).
+    ///
+    /// `delay` shifts the sound against the picture (audio sync): with a positive delay the
+    /// stream plays what the source has `delay` earlier, so the sound comes later; before the
+    /// start of the source that is silence. A negative delay makes the sound come earlier.
     fn audio_stream(
         &self,
         media: &MediaInfo,
         track: usize,
-        from: i64,
-        count: i64,
+        span: (i64, i64),
+        delay: Tick,
         format: AudioFormat,
     ) -> Result<Box<dyn AudioStream>, MediaError>;
 

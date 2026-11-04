@@ -76,6 +76,9 @@ Each task has an id (`M<milestone>.<n>`); one task per commit.
   (`h264_nvenc`/`hevc_nvenc`, constant quality `-cq`), only for codecs with an NVENC encoder and unrotated video
 - [x] M5.6 NVENC quality levels calibrated with VMAF against x264/x265 (H.264 CQ 27/31/36, H.265 CQ 28/33/38: same
   quality, about the same size); size estimate recalibrated on measured exports
+- [x] M5.7 Audio sync: `Sync ◀ [+0 ms] ▶` left of the audio tracks in the status line and in the export dialog —
+  milliseconds typed in (+ = sound later, ±10 s) or ±50 ms per arrow; shifts the sound in playback and export
+  (silence where it reaches back before the start of the video); kept per opened video
 
 ## Later
 

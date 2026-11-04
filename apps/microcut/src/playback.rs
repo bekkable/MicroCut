@@ -14,6 +14,7 @@ use std::time::Instant;
 
 use eframe::egui;
 use microcut_media::{AudioFormat, MediaBackend, MediaInfo, VideoFrame};
+use microcut_time::Tick;
 
 use crate::audio::{AudioOut, AudioShared};
 
@@ -63,17 +64,17 @@ pub struct Playback {
 
 impl Playback {
     /// Starts playing frames `from..=last` of `media`, pictures scaled to fit `size`, sound
-    /// from audio track `sound.0` (silent if `None`) at the volume in `sound.1` (see
-    /// [`crate::volume`]).
+    /// from audio track `sound.0` (silent if `None`) shifted by the audio sync `sound.1`, at
+    /// the volume in `sound.2` (see [`crate::volume`]).
     pub fn start(
         backend: &Arc<dyn MediaBackend>,
         media: &Arc<MediaInfo>,
         (from, last): (i64, i64),
         size: (u32, u32),
-        sound: (Option<usize>, &Arc<AtomicU32>),
+        sound: (Option<usize>, Tick, &Arc<AtomicU32>),
         ctx: &egui::Context,
     ) -> Playback {
-        let (track, gain) = sound;
+        let (track, delay, gain) = sound;
         let count = last.saturating_sub(from).saturating_add(1).max(1);
         let rate = media.video.frame_rate;
 
@@ -110,7 +111,7 @@ impl Playback {
 
         let (audio, audio_note) = match track {
             None => (None, None),
-            Some(track) => match start_audio(backend, media, (track, from, count), gain) {
+            Some(track) => match start_audio(backend, media, (track, from, count, delay), gain) {
                 Ok(out) => (Some(out), None),
                 Err(note) => (None, Some(note)),
             },
@@ -285,7 +286,7 @@ fn video_worker(
 fn start_audio(
     backend: &Arc<dyn MediaBackend>,
     media: &Arc<MediaInfo>,
-    span: (usize, i64, i64),
+    span: (usize, i64, i64, Tick),
     gain: &Arc<AtomicU32>,
 ) -> Result<AudioOut, String> {
     let out = AudioOut::open(Arc::clone(gain))?;
@@ -308,11 +309,11 @@ fn start_audio(
 fn audio_worker(
     backend: &dyn MediaBackend,
     media: &MediaInfo,
-    (track, from, count): (usize, i64, i64),
+    (track, from, count, delay): (usize, i64, i64, Tick),
     format: AudioFormat,
     shared: &AudioShared,
 ) {
-    let mut stream = match backend.audio_stream(media, track, from, count, format) {
+    let mut stream = match backend.audio_stream(media, track, (from, count), delay, format) {
         Ok(stream) => stream,
         Err(err) => {
             shared.set_error(err.to_string());

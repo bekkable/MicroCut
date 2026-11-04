@@ -11,6 +11,7 @@ use microcut_media::{
     AudioCodec, AudioExport, AudioFormat, ExportEnd, ExportJob, FfmpegBackend, MediaBackend,
     MediaError, MediaInfo, VideoCodec, VideoFrame, VideoQuality,
 };
+use microcut_time::Tick;
 
 /// Gray video of `w`×`h` whose frame N has luma 16 + 3·N (as in `stream.rs`), no audio.
 fn numbered_clip(backend: &FfmpegBackend, fps: u32, (w, h): (u32, u32), ext: &str) -> PathBuf {
@@ -232,6 +233,7 @@ fn every_available_codec_exports() {
                     track: 0,
                     codec: *audio,
                     kbps: audio.default_bitrate(),
+                    delay: Tick::ZERO,
                 }),
                 ..job(output.clone(), 5, 20)
             };
@@ -258,6 +260,7 @@ fn the_chosen_audio_track_is_exported() {
                 track,
                 codec: AudioCodec::Aac,
                 kbps: 128,
+                delay: Tick::ZERO,
             }),
             ..job(output.clone(), 10, 25)
         };
@@ -275,13 +278,50 @@ fn the_chosen_audio_track_is_exported() {
     assert!(levels[1] < 1e-3, "track 1 is silent: {levels:?}");
 }
 
+#[test]
+fn audio_sync_is_exported() {
+    let Some(backend) = backend_with(VideoCodec::H264) else {
+        return;
+    };
+    let media = backend
+        .probe(&common::tone_after_one_second(&backend))
+        .unwrap();
+    let dir = out_dir("sync");
+    let ms = Tick::from_millis;
+    // (first frame, delay in ms, where the tone starts in the export, in s); the source's tone
+    // starts at 1 s, frame 10 at 0.4 s.
+    for (from, delay, onset) in [(0, 0, 1.0), (0, 200, 1.2), (10, 600, 1.2), (10, -250, 0.35)] {
+        let output = dir.join(format!("from_{from}_delay_{delay}.mp4"));
+        let job = ExportJob {
+            audio: Some(AudioExport {
+                track: 0,
+                codec: AudioCodec::Aac,
+                kbps: 192,
+                delay: ms(delay),
+            }),
+            ..job(output.clone(), from, 40)
+        };
+        export(&backend, &media, &job);
+        let out = backend.probe(&output).unwrap();
+        assert_eq!(out.frame_count(), 40, "{output:?}");
+        let got = common::onset_secs(&read_audio(&backend, &out));
+        // AAC smears the onset over a few milliseconds.
+        assert!(
+            (got - onset).abs() < 0.01,
+            "from {from}, delay {delay} ms: tone at {got} s, expected {onset} s"
+        );
+    }
+}
+
 fn read_audio(backend: &FfmpegBackend, media: &MediaInfo) -> Vec<f32> {
     let format = AudioFormat {
         sample_rate: 48_000,
         channels: 2,
     };
     let count = media.frame_count();
-    let mut stream = backend.audio_stream(media, 0, 0, count, format).unwrap();
+    let mut stream = backend
+        .audio_stream(media, 0, (0, count), Tick::ZERO, format)
+        .unwrap();
     let mut samples = Vec::new();
     let mut buf = vec![0.0; 4096];
     loop {
@@ -361,6 +401,7 @@ fn failures_are_reported_and_leave_no_file() {
             track: 0,
             codec: AudioCodec::Aac,
             kbps: 128,
+            delay: Tick::ZERO,
         }),
         ..job(output.clone(), 0, 5)
     };

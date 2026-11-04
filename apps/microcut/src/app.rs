@@ -12,6 +12,7 @@ use crate::export::{self, Choices, ExportDialog, Outcome};
 use crate::loader::ProbeJob;
 use crate::playback::{Playback, Step, stop_frame};
 use crate::preview::Preview;
+use crate::sync::{self, SyncEdit};
 use crate::thumbs::Thumbnails;
 use crate::timeline::Timeline;
 use crate::tracks;
@@ -205,7 +206,8 @@ impl MicroCutApp {
             },
         };
         let media = Arc::clone(session.media());
-        match ExportDialog::new(media, session.range(), encoders, self.exports.choices) {
+        let cut = (session.range(), session.audio_delay_ms());
+        match ExportDialog::new(media, cut, encoders, self.exports.choices) {
             Ok(dialog) => self.exports.dialog = Some(dialog),
             Err(message) => self.transport.message = Some(message),
         }
@@ -218,6 +220,9 @@ impl MicroCutApp {
         };
         let outcome = dialog.show(ctx, backend);
         self.exports.choices = dialog.choices();
+        if let Document::Loaded(session) = &mut self.document {
+            session.set_audio_delay_ms(dialog.audio_delay_ms());
+        }
         match outcome {
             Outcome::Open => {}
             Outcome::Closed => self.exports.dialog = None,
@@ -278,6 +283,19 @@ impl MicroCutApp {
         }
     }
 
+    /// Changes the audio sync; once the user is done with it, a running playback continues from
+    /// the cursor with the new value.
+    fn set_audio_delay(&mut self, edit: SyncEdit) {
+        let Document::Loaded(session) = &mut self.document else {
+            return;
+        };
+        session.set_audio_delay_ms(edit.ms);
+        if edit.commit && self.transport.playing.is_some() {
+            self.transport.playing = None;
+            self.start_playback(false);
+        }
+    }
+
     fn toggle_play(&mut self) {
         if self.transport.is_playing() {
             // The cursor stays on the frame shown last.
@@ -313,7 +331,11 @@ impl MicroCutApp {
             session.media(),
             (from, to),
             size,
-            (session.audio_track(), &self.volume.gain()),
+            (
+                session.audio_track(),
+                session.audio_delay(),
+                &self.volume.gain(),
+            ),
             &self.ctx,
         ));
         self.transport.cursor = from;
@@ -480,6 +502,9 @@ impl eframe::App for MicroCutApp {
         if let Some(track) = actions.track {
             self.select_audio_track(track);
         }
+        if let Some(edit) = actions.sync {
+            self.set_audio_delay(edit);
+        }
         if let (Some(which), Document::Loaded(session)) = (actions.mark, &mut self.document) {
             match which {
                 RangeEnd::Start => session.mark_start(),
@@ -520,12 +545,14 @@ struct StatusActions {
     play: bool,
     /// This audio track was chosen.
     track: Option<usize>,
+    /// The audio sync was changed.
+    sync: Option<SyncEdit>,
     /// Set this end of the range to the cursor.
     mark: Option<RangeEnd>,
 }
 
 /// Play/pause button, cursor time and frame, the selected range, playback and decoder state,
-/// audio tracks, volume.
+/// audio sync, audio tracks, volume.
 fn status_line(
     ui: &mut egui::Ui,
     session: &Session,
@@ -539,6 +566,11 @@ fn status_line(
             volume.ui(ui);
             ui.add_space(6.0);
             actions.track = tracks::buttons(ui, &session.media().audio, session.audio_track());
+            if session.audio_track().is_some() {
+                ui.add_space(6.0);
+                actions.sync = sync::control(ui, session.audio_delay_ms());
+                ui.weak("Sync");
+            }
             ui.add_space(8.0);
             let preview_error = status.preview.and_then(Preview::error);
             if status.preview.is_some_and(Preview::is_busy)

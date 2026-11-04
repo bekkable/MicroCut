@@ -9,6 +9,7 @@ use std::time::Instant;
 use microcut_media::{
     AudioCodec, AudioExport, ExportJob, FfmpegBackend, MediaBackend, VideoCodec, VideoQuality,
 };
+use microcut_time::Tick;
 
 fn main() -> ExitCode {
     match run() {
@@ -41,6 +42,7 @@ fn run() -> Result<(), String> {
             track: 0,
             codec: AudioCodec::Aac,
             kbps: 192,
+            delay: Tick::ZERO,
         }),
     };
     let started = Instant::now();
