@@ -117,20 +117,26 @@ pub fn estimate_bytes(
     let secs = frames.max(0) as f64 / fps.max(1e-3);
     let (w, h) = media.video.display_size();
     let pixels = f64::from(w) * f64::from(h);
-    // Later frames repeat much of earlier ones: bits grow slower than the frame rate.
+    // Measured on 720p60 recordings (one menu, three gameplay scenes): x264 "High" averages
+    // 5.5 Mbit/s, "Medium" 54 % and "Small" 30 % of that; x265 needs 72 %. NVENC at the
+    // calibrated CQ values (`VideoCodec::hardware_cq`) is about as large as x264 and 7 % larger
+    // than x265. AV1 is assumed a bit smaller than H.265.
     let codec = match video {
         VideoCodec::H264 => 1.0,
-        VideoCodec::H265 => 0.65,
-        VideoCodec::Av1 => 0.55,
+        VideoCodec::H265 => 0.72,
+        VideoCodec::Av1 => 0.6,
     };
     let level = match quality {
         VideoQuality::High => 1.0,
-        VideoQuality::Medium => 0.5,
-        VideoQuality::Small => 0.25,
+        VideoQuality::Medium => 0.54,
+        VideoQuality::Small => 0.3,
     };
-    // NVENC needs about half again as many bits for the same picture.
-    let hardware = if hardware { 1.5 } else { 1.0 };
-    let video_bps = 0.2 * pixels * fps.max(1.0).powf(0.7) * codec * level * hardware;
+    let hardware = match (hardware, video) {
+        (true, VideoCodec::H265 | VideoCodec::Av1) => 1.07,
+        _ => 1.0,
+    };
+    // Later frames repeat much of earlier ones: bits grow slower than the frame rate.
+    let video_bps = 0.34 * pixels * fps.max(1.0).powf(0.7) * codec * level * hardware;
     let audio_bps = f64::from(audio_kbps.unwrap_or(0)) * 1000.0;
     let bytes = (video_bps + audio_bps) * secs / 8.0;
     if bytes.is_finite() && bytes > 0.0 {
@@ -247,8 +253,8 @@ mod tests {
             (VideoCodec::H264, VideoQuality::High, false),
             None,
         );
-        // 10 s of 720p60 H.264 "High": a few MB.
-        assert!((2_000_000..10_000_000).contains(&high), "{high}");
+        // 10 s of 720p60 H.264 "High": measured 3.9 to 9.6 MB.
+        assert!((5_000_000..8_000_000).contains(&high), "{high}");
         let small = estimate_bytes(
             &media,
             600,
@@ -268,7 +274,19 @@ mod tests {
             (VideoCodec::H264, VideoQuality::High, true),
             None,
         );
-        assert!(nvenc > high, "NVENC files are larger");
+        assert_eq!(nvenc, high, "NVENC is calibrated to x264's sizes");
+        let hevc = |hardware| {
+            estimate_bytes(
+                &media,
+                600,
+                (VideoCodec::H265, VideoQuality::High, hardware),
+                None,
+            )
+        };
+        assert!(
+            hevc(true) > hevc(false),
+            "hevc_nvenc is a little larger than x265"
+        );
         let with_audio = estimate_bytes(
             &media,
             600,

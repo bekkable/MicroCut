@@ -84,7 +84,12 @@ output file is created exclusively before ffmpeg runs (`-y` then only overwrites
 is never replaced, and it is removed again on failure or cancel. Progress comes from `-progress pipe:1`. With
 hardware acceleration the video input gets `-hwaccel cuda -hwaccel_output_format cuda` and the encoder is NVENC
 (`-rc vbr -cq`): pictures stay on the GPU, so a software encoder could not take them; `setpts` and `crop` work on GPU
-frames, the automatic rotation does not (rotated video is refused).
+frames, the automatic rotation does not (rotated video is refused). The NVENC quality values
+(`VideoCodec::hardware_cq`) are calibrated with VMAF: per quality level, the CQ at which NVENC (preset p5) matches
+the VMAF of x264/x265 at the level's CRF, on four 10 s scenes of 720p60 recordings (menu and gameplay). VMAF needs a
+reference with exactly the same frames: a lossless (`-qp 0`) encode of the range, compared frame by index
+(`settb=1/60,setpts=N` on both inputs) — comparing by timestamps mis-pairs frames of Matroska sources (1 ms
+timestamps) and drags even identical videos down to ~89.
 `crates/media/tests/export.rs` checks frame numbers, the audio track, every available codec, cancel and failure.
 
 The frame count comes from the video stream's duration when the container has one (the container duration also covers

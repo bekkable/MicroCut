@@ -74,6 +74,8 @@ Each task has an id (`M<milestone>.<n>`); one task per commit.
   range (Ctrl+Home/End: first/last frame of the clip); `E` opens the export dialog; export option "Hardware
   acceleration (NVIDIA)": CUDA decoding (`-hwaccel cuda -hwaccel_output_format cuda`) and NVENC encoding
   (`h264_nvenc`/`hevc_nvenc`, constant quality `-cq`), only for codecs with an NVENC encoder and unrotated video
+- [x] M5.6 NVENC quality levels calibrated with VMAF against x264/x265 (H.264 CQ 27/31/36, H.265 CQ 28/33/38: same
+  quality, about the same size); size estimate recalibrated on measured exports
 
 ## Later
 

@@ -231,7 +231,7 @@ impl ExportDialog {
                     "Your FFmpeg has no NVIDIA encoder for this codec."
                 } else {
                     "Decodes on the graphics card (CUDA) and encodes with NVENC: much faster, \
-                     files about half again as large. Needs an NVIDIA graphics card."
+                     same quality at about the same file size. Needs an NVIDIA graphics card."
                 };
                 let mut shown = choices.hardware && possible;
                 let checkbox = ui

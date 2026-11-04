@@ -44,19 +44,21 @@ impl VideoCodec {
         }
     }
 
-    /// Constant-quality value (`-cq`) of the NVIDIA encoder for `quality`. NVENC needs more bits
-    /// than the software encoders for the same picture, so its values are lower than
-    /// [`VideoCodec::crf`] suggests.
+    /// Constant-quality value (`-cq`, preset p5) of the NVIDIA encoder for `quality`: the value
+    /// at which NVENC reaches the same VMAF as the software encoder at [`VideoCodec::crf`].
+    /// Measured on 720p60 screen recordings (one menu, three gameplay scenes, 10 s each):
+    /// x264 CRF 18/23/28 ≙ h264_nvenc CQ 26–30/30–34/35–38, x265 CRF 20/25/30 ≙ hevc_nvenc CQ
+    /// 28–31/32–36/37–41; the values lean to the better quality. Files come out about as large
+    /// as with the software encoder. AV1 is unmeasured (no av1_nvenc on the test machine) and
+    /// follows the H.265 values.
     pub fn hardware_cq(self, quality: VideoQuality) -> u32 {
-        let base = match self {
-            VideoCodec::H264 => 23,
-            VideoCodec::H265 => 25,
-            VideoCodec::Av1 => 28,
-        };
-        match quality {
-            VideoQuality::High => base,
-            VideoQuality::Medium => base + 5,
-            VideoQuality::Small => base + 10,
+        match (self, quality) {
+            (VideoCodec::H264, VideoQuality::High) => 27,
+            (VideoCodec::H264, VideoQuality::Medium) => 31,
+            (VideoCodec::H264, VideoQuality::Small) => 36,
+            (VideoCodec::H265 | VideoCodec::Av1, VideoQuality::High) => 28,
+            (VideoCodec::H265 | VideoCodec::Av1, VideoQuality::Medium) => 33,
+            (VideoCodec::H265 | VideoCodec::Av1, VideoQuality::Small) => 38,
         }
     }
 
