@@ -109,7 +109,7 @@ pub fn default_audio_track(audio: &[AudioInfo]) -> Option<usize> {
 pub fn estimate_bytes(
     media: &MediaInfo,
     frames: i64,
-    (video, quality): (VideoCodec, VideoQuality),
+    (video, quality, hardware): (VideoCodec, VideoQuality, bool),
     audio_kbps: Option<u32>,
 ) -> u64 {
     let rate = media.video.frame_rate;
@@ -128,7 +128,9 @@ pub fn estimate_bytes(
         VideoQuality::Medium => 0.5,
         VideoQuality::Small => 0.25,
     };
-    let video_bps = 0.2 * pixels * fps.max(1.0).powf(0.7) * codec * level;
+    // NVENC needs about half again as many bits for the same picture.
+    let hardware = if hardware { 1.5 } else { 1.0 };
+    let video_bps = 0.2 * pixels * fps.max(1.0).powf(0.7) * codec * level * hardware;
     let audio_bps = f64::from(audio_kbps.unwrap_or(0)) * 1000.0;
     let bytes = (video_bps + audio_bps) * secs / 8.0;
     if bytes.is_finite() && bytes > 0.0 {
@@ -239,21 +241,48 @@ mod tests {
     #[test]
     fn estimates_follow_the_settings() {
         let media = media(60, 600);
-        let high = estimate_bytes(&media, 600, (VideoCodec::H264, VideoQuality::High), None);
+        let high = estimate_bytes(
+            &media,
+            600,
+            (VideoCodec::H264, VideoQuality::High, false),
+            None,
+        );
         // 10 s of 720p60 H.264 "High": a few MB.
         assert!((2_000_000..10_000_000).contains(&high), "{high}");
-        let small = estimate_bytes(&media, 600, (VideoCodec::H264, VideoQuality::Small), None);
-        let av1 = estimate_bytes(&media, 600, (VideoCodec::Av1, VideoQuality::High), None);
+        let small = estimate_bytes(
+            &media,
+            600,
+            (VideoCodec::H264, VideoQuality::Small, false),
+            None,
+        );
+        let av1 = estimate_bytes(
+            &media,
+            600,
+            (VideoCodec::Av1, VideoQuality::High, false),
+            None,
+        );
         assert!(small < high && av1 < high);
+        let nvenc = estimate_bytes(
+            &media,
+            600,
+            (VideoCodec::H264, VideoQuality::High, true),
+            None,
+        );
+        assert!(nvenc > high, "NVENC files are larger");
         let with_audio = estimate_bytes(
             &media,
             600,
-            (VideoCodec::H264, VideoQuality::High),
+            (VideoCodec::H264, VideoQuality::High, false),
             Some(192),
         );
         assert_eq!(with_audio - high, 240_000, "192 kbit/s for 10 s");
         assert_eq!(
-            estimate_bytes(&media, -5, (VideoCodec::H264, VideoQuality::High), None),
+            estimate_bytes(
+                &media,
+                -5,
+                (VideoCodec::H264, VideoQuality::High, false),
+                None
+            ),
             0
         );
     }

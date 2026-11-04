@@ -16,16 +16,18 @@ one audio track of your choice); the preview always shows the exact frame at the
 | Drag the timeline or its scrollbar, Shift+wheel | Scroll the timeline                   |
 | Click on the timeline                  | Move the cursor                                |
 | Drag a range handle (frame scale)      | Move the start or end of the range (Shift: snap to the time scale) |
+| Click a range handle                   | Cursor to that end of the range                |
 | Click / drag an edge arrow (frame scale) | Bring a range end that is out of view to the edge of the view / take hold of it |
 | Double-click the time scale or scrollbar | Show the whole clip                          |
 | `I` / `O`, "Set start" / "Set end"     | Start / end the range at the cursor            |
 | ←/→ or A/D                             | One frame (keys pause playback)                |
 | ↑/↓ or W/S (or Shift+←/→), Page Up/Down | One second, ten seconds                       |
-| Home/End                               | First/last frame                               |
+| Home/End                               | Start/end of the range                         |
+| Ctrl+Home/End                          | First/last frame of the clip                   |
 | Speaker / wedge / wheel (status line)  | Mute, set volume                               |
 | `[0] [1] …` left of the speaker        | Choose the audio track (videos with several)   |
 | Ctrl+O                                 | Open a video                                   |
-| Export…, Ctrl+E                        | Export the range (codecs, quality, audio track, file name) |
+| Export…, E, Ctrl+E                     | Export the range (codecs, quality, audio track, file name; optionally on an NVIDIA graphics card) |
 
 ## Build and run
 

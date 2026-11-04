@@ -35,6 +35,31 @@ impl VideoCodec {
         }
     }
 
+    /// The NVIDIA encoder (NVENC) for hardware-accelerated exports.
+    pub fn hardware_encoder(self) -> &'static str {
+        match self {
+            VideoCodec::H264 => "h264_nvenc",
+            VideoCodec::H265 => "hevc_nvenc",
+            VideoCodec::Av1 => "av1_nvenc",
+        }
+    }
+
+    /// Constant-quality value (`-cq`) of the NVIDIA encoder for `quality`. NVENC needs more bits
+    /// than the software encoders for the same picture, so its values are lower than
+    /// [`VideoCodec::crf`] suggests.
+    pub fn hardware_cq(self, quality: VideoQuality) -> u32 {
+        let base = match self {
+            VideoCodec::H264 => 23,
+            VideoCodec::H265 => 25,
+            VideoCodec::Av1 => 28,
+        };
+        match quality {
+            VideoQuality::High => base,
+            VideoQuality::Medium => base + 5,
+            VideoQuality::Small => base + 10,
+        }
+    }
+
     /// Constant-quality value (`-crf`) for `quality`; lower is better and larger.
     pub fn crf(self, quality: VideoQuality) -> u32 {
         match (self, quality) {
@@ -150,6 +175,8 @@ pub struct ExportJob {
     pub video: VideoCodec,
     /// Video quality.
     pub quality: VideoQuality,
+    /// Decode on the GPU (CUDA) and encode with NVENC; see [`Encoders::hardware`].
+    pub hardware: bool,
     /// The audio track to include, or `None` for a silent video.
     pub audio: Option<AudioExport>,
 }
@@ -170,6 +197,9 @@ pub struct Encoders {
     pub video: Vec<VideoCodec>,
     /// Available audio codecs, in [`AudioCodec::ALL`] order.
     pub audio: Vec<AudioCodec>,
+    /// Video codecs whose NVIDIA encoder FFmpeg has. Whether a suitable graphics card is
+    /// present only shows when exporting.
+    pub hardware: Vec<VideoCodec>,
 }
 
 impl Encoders {
@@ -195,6 +225,10 @@ impl Encoders {
             audio: AudioCodec::ALL
                 .into_iter()
                 .filter(|c| has(c.encoder()))
+                .collect(),
+            hardware: VideoCodec::ALL
+                .into_iter()
+                .filter(|c| has(c.hardware_encoder()))
                 .collect(),
         }
     }
@@ -240,11 +274,13 @@ mod tests {
             V....D libx264              libx264 H.264 / AVC\n \
             V....D libx265rgb           not the one\n \
             V..... libsvtav1            SVT-AV1\n \
+            V....D hevc_nvenc           NVIDIA NVENC hevc encoder\n \
             A....D aac                  AAC (Advanced Audio Coding)\n \
             A....D aac_mf               AAC via MediaFoundation\n";
         let encoders = Encoders::parse(listing);
         assert_eq!(encoders.video, [VideoCodec::H264, VideoCodec::Av1]);
         assert_eq!(encoders.audio, [AudioCodec::Aac]);
+        assert_eq!(encoders.hardware, [VideoCodec::H265]);
         assert_eq!(Encoders::parse(""), Encoders::default());
     }
 

@@ -373,6 +373,11 @@ fn export_args(media: &MediaInfo, job: &ExportJob) -> Result<Vec<OsString>, Medi
             return Err(MediaError::BadExport("audio bit rate out of range"));
         }
     }
+    if job.hardware && media.video.rotation != 0 {
+        return Err(MediaError::BadExport(
+            "hardware acceleration cannot export rotated video; turn it off",
+        ));
+    }
     let rate = media.video.frame_rate;
     let from = frame::clamp_frame(media, job.from);
     let count = job
@@ -391,6 +396,11 @@ fn export_args(media: &MediaInfo, job: &ExportJob) -> Result<Vec<OsString>, Medi
     // Video from half a frame before the first frame (see `seek_target`), so that frame is the
     // first one out; audio sample-exact from the frame's start, as a second input.
     let video_seek = DecimalSecs(frame::seek_target(media, from)).to_string();
+    if job.hardware {
+        // Decoded pictures stay in GPU memory for NVENC (ffmpeg falls back to the CPU decoder
+        // for codecs the GPU cannot decode; NVENC takes those pictures too).
+        push(&["-hwaccel", "cuda", "-hwaccel_output_format", "cuda"]);
+    }
     push(&["-ss", &video_seek, "-i"]);
     args.push(media.path.clone().into_os_string());
     if job.audio.is_some() {
@@ -402,32 +412,42 @@ fn export_args(media: &MediaInfo, job: &ExportJob) -> Result<Vec<OsString>, Medi
 
     push(&["-map", "0:V:0"]);
     let codec = job.video;
-    let crf = codec.crf(job.quality).to_string();
-    // The video starts at time 0 like the audio; yuv420p (what every player decodes) needs even
-    // sizes, so an odd last row or column is cropped.
+    // The video starts at time 0 like the audio; 4:2:0 video (what every player decodes) needs
+    // even sizes, so an odd last row or column is cropped.
     push(&[
         "-vf",
         "setpts=PTS-STARTPTS,crop=trunc(iw/2)*2:trunc(ih/2)*2",
         "-fps_mode",
         "passthrough",
-        "-c:v",
-        codec.encoder(),
-        "-crf",
-        &crf,
-        "-pix_fmt",
-        "yuv420p",
     ]);
-    match codec {
-        VideoCodec::H264 => push(&["-preset", "medium"]),
-        VideoCodec::H265 => push(&[
+    if job.hardware {
+        let cq = codec.hardware_cq(job.quality).to_string();
+        push(&[
+            "-c:v",
+            codec.hardware_encoder(),
             "-preset",
-            "medium",
-            "-tag:v",
-            "hvc1",
-            "-x265-params",
-            "log-level=error",
-        ]),
-        VideoCodec::Av1 => push(&["-preset", "8"]),
+            "p5",
+            "-tune",
+            "hq",
+            "-rc",
+            "vbr",
+            "-cq",
+            &cq,
+            "-b:v",
+            "0",
+        ]);
+    } else {
+        let crf = codec.crf(job.quality).to_string();
+        push(&["-c:v", codec.encoder(), "-crf", &crf, "-pix_fmt", "yuv420p"]);
+        match codec {
+            VideoCodec::H264 => push(&["-preset", "medium"]),
+            VideoCodec::H265 => push(&["-preset", "medium", "-x265-params", "log-level=error"]),
+            VideoCodec::Av1 => push(&["-preset", "8"]),
+        }
+    }
+    if codec == VideoCodec::H265 {
+        // The tag Apple players need for HEVC in MP4.
+        push(&["-tag:v", "hvc1"]);
     }
     if let Some(audio) = &job.audio {
         let map = format!("1:a:{}", audio.track);

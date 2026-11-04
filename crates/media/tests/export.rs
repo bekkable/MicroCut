@@ -96,6 +96,7 @@ fn job(output: PathBuf, from: i64, count: i64) -> ExportJob {
         count,
         video: VideoCodec::H264,
         quality: VideoQuality::High,
+        hardware: false,
         audio: None,
     }
 }
@@ -142,6 +143,40 @@ fn export_contains_exactly_the_range() {
         let out = backend.probe(&output).unwrap();
         assert_eq!(out.video.frame_rate, media.video.frame_rate);
         assert!(out.audio.is_empty());
+    }
+}
+
+/// CUDA decoding and NVENC: as exact as the software path. Skipped without an NVENC encoder;
+/// with one but no usable NVIDIA card the export fails, which is reported as a skip too.
+#[test]
+fn hardware_export_contains_exactly_the_range() {
+    let Some(backend) = common::backend() else {
+        return;
+    };
+    let encoders = backend.encoders().unwrap();
+    let dir = out_dir("hardware");
+    for codec in encoders.hardware {
+        // NVENC refuses very small pictures.
+        let clip = numbered_clip(&backend, 25, (256, 144), "mp4");
+        let media = backend.probe(&clip).unwrap();
+        let output = dir.join(format!("{}.mp4", codec.hardware_encoder()));
+        let job = ExportJob {
+            video: codec,
+            hardware: true,
+            ..job(output.clone(), 7, 10)
+        };
+        match backend.export(&media, &job, &mut |_| true) {
+            Ok(end) => assert_eq!(end, ExportEnd::Finished),
+            Err(MediaError::ExportFailed { message }) => {
+                eprintln!("skipping {}: {message}", codec.hardware_encoder());
+                continue;
+            }
+            Err(err) => panic!("{err:?}"),
+        }
+        let expected: Vec<i64> = (7..17).collect();
+        assert_eq!(numbers(&backend, &output), expected, "{codec:?}");
+        let out = backend.probe(&output).unwrap();
+        assert_eq!((out.video.width, out.video.height), (256, 144));
     }
 }
 

@@ -70,6 +70,10 @@ Each task has an id (`M<milestone>.<n>`); one task per commit.
   Encode (Enter); codec choices are remembered for the next export
 - [x] M5.4 Progress in the dialog (bar, frames, time left), cancel, errors; afterwards "Exported <name>" with "Show
   in folder" in the toolbar
+- [x] M5.5 Feedback: a click on a range handle moves the cursor to that end; Home/End jump to the start/end of the
+  range (Ctrl+Home/End: first/last frame of the clip); `E` opens the export dialog; export option "Hardware
+  acceleration (NVIDIA)": CUDA decoding (`-hwaccel cuda -hwaccel_output_format cuda`) and NVENC encoding
+  (`h264_nvenc`/`hevc_nvenc`, constant quality `-cq`), only for codecs with an NVENC encoder and unrotated video
 
 ## Later
 

@@ -36,6 +36,7 @@ fn run() -> Result<(), String> {
         count: parse(count)?,
         video: VideoCodec::H264,
         quality: VideoQuality::High,
+        hardware: false,
         audio: (!media.audio.is_empty()).then_some(AudioExport {
             track: 0,
             codec: AudioCodec::Aac,

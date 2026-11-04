@@ -260,8 +260,8 @@ fn apply_drag(
 }
 
 /// A click (press and release without moving): arrow → that range end to the edge of the view,
-/// scrollbar → centre the view there, elsewhere (but on a handle) → cursor to the frame under
-/// the pointer.
+/// scrollbar → centre the view there, range handle → cursor to that end's frame, elsewhere →
+/// cursor to the frame under the pointer.
 fn click(rows: &Rows, pos: Pos2, session: &mut Session) {
     if let Some((side, _)) = arrow_at(rows, pos, session) {
         session.bring_hidden_end(side);
@@ -270,7 +270,14 @@ fn click(rows: &Rows, pos: Pos2, session: &mut Session) {
         let centre = scrollbar_pos(rows, pos.x, view.end());
         let span = view.span();
         view.set_left(centre - span / 2.0);
-    } else if handle_at(rows, pos, session).is_none() {
+    } else if let Some(handle) = handle_at(rows, pos, session) {
+        let range = session.range();
+        match handle {
+            Drag::RangeStart => session.set_cursor(range.start()),
+            Drag::RangeEnd => session.set_cursor(range.end()),
+            Drag::Pan | Drag::Scrollbar { .. } => {}
+        }
+    } else {
         let x = f64::from(pos.x - rows.frames.left());
         let frame = session.view().frame_at(x);
         session.set_cursor(frame);

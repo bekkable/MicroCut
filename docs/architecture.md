@@ -81,7 +81,10 @@ Export (`MediaBackend::export`, `crates/media/src/ffmpeg.rs`) re-encodes, so it 
 seeks like playback and is limited to the frame count (`-frames:v`); the audio track is opened as a second input of the
 same file, seeked sample-exactly to the first frame's start, and both are cut to the range's duration (`-t`). The
 output file is created exclusively before ffmpeg runs (`-y` then only overwrites that empty file), so an existing file
-is never replaced, and it is removed again on failure or cancel. Progress comes from `-progress pipe:1`.
+is never replaced, and it is removed again on failure or cancel. Progress comes from `-progress pipe:1`. With
+hardware acceleration the video input gets `-hwaccel cuda -hwaccel_output_format cuda` and the encoder is NVENC
+(`-rc vbr -cq`): pictures stay on the GPU, so a software encoder could not take them; `setpts` and `crop` work on GPU
+frames, the automatic rotation does not (rotated video is refused).
 `crates/media/tests/export.rs` checks frame numbers, the audio track, every available codec, cancel and failure.
 
 The frame count comes from the video stream's duration when the container has one (the container duration also covers

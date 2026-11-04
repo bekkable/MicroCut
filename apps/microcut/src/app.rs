@@ -233,7 +233,11 @@ impl MicroCutApp {
             // The dialog has the keyboard; files dropped meanwhile are ignored.
             return;
         }
-        if ui.input_mut(|i| i.consume_shortcut(&EXPORT_SHORTCUT)) {
+        let free_keyboard = ui.memory(|m| m.focused().is_none());
+        let export = ui.input_mut(|i| {
+            i.consume_shortcut(&EXPORT_SHORTCUT) || (free_keyboard && i.consume_key(NONE, Key::E))
+        });
+        if export {
             self.open_export();
             return;
         }
@@ -373,7 +377,7 @@ impl MicroCutApp {
             let export = ui
                 .add_enabled(loaded, egui::Button::new("Export…"))
                 .on_hover_text(format!(
-                    "Export the selected range ({})",
+                    "Export the selected range (E or {})",
                     ui.ctx().format_shortcut(&EXPORT_SHORTCUT)
                 ));
             if export.clicked() {
@@ -647,7 +651,13 @@ enum Jump {
     Frames(i64),
     /// By this many seconds (rounded to whole frames).
     Seconds(i64),
+    /// First frame of the range.
+    RangeStart,
+    /// Last frame of the range.
+    RangeEnd,
+    /// First frame of the clip.
     First,
+    /// Last frame of the clip.
     Last,
 }
 
@@ -668,31 +678,48 @@ const NAVIGATION: &[(Modifiers, Key, Jump)] = &[
     (NONE, Key::S, Jump::Seconds(-1)),
     (NONE, Key::PageUp, Jump::Seconds(10)),
     (NONE, Key::PageDown, Jump::Seconds(-10)),
-    (NONE, Key::Home, Jump::First),
-    (NONE, Key::End, Jump::Last),
+    (COMMAND, Key::Home, Jump::First),
+    (COMMAND, Key::End, Jump::Last),
+    (NONE, Key::Home, Jump::RangeStart),
+    (NONE, Key::End, Jump::RangeEnd),
 ];
 const NONE: Modifiers = Modifiers::NONE;
 const SHIFT: Modifiers = Modifiers::SHIFT;
+const COMMAND: Modifiers = Modifiers::COMMAND;
+
+/// Where the cursor can jump to besides relative moves.
+struct Landmarks {
+    /// First and last frame of the range.
+    range: (i64, i64),
+    last: i64,
+    frames_per_second: i64,
+}
 
 /// The frame `jump` leads to from `cursor` (clamping to the clip is the session's job).
-fn jump_target(jump: Jump, cursor: i64, last: i64, frames_per_second: i64) -> i64 {
+fn jump_target(jump: Jump, cursor: i64, marks: &Landmarks) -> i64 {
     match jump {
         Jump::Frames(n) => cursor.saturating_add(n),
-        Jump::Seconds(n) => cursor.saturating_add(n.saturating_mul(frames_per_second)),
+        Jump::Seconds(n) => cursor.saturating_add(n.saturating_mul(marks.frames_per_second)),
+        Jump::RangeStart => marks.range.0,
+        Jump::RangeEnd => marks.range.1,
         Jump::First => 0,
-        Jump::Last => last,
+        Jump::Last => marks.last,
     }
 }
 
 /// ←/→ (A/D) one frame, ↑/↓ (W/S, Shift+←/→) one second, Page Up/Down ten seconds, Home/End
-/// first/last frame; the timeline scrolls along. +/− zoom. Only when no text field or other
-/// widget has the keyboard. Returns whether the cursor was moved.
+/// start/end of the range, Ctrl+Home/End first/last frame; the timeline scrolls along. +/− zoom.
+/// Only when no text field or other widget has the keyboard. Returns whether the cursor was moved.
 fn cursor_keys(ui: &mut egui::Ui, session: &mut Session) -> bool {
     if ui.memory(|m| m.focused().is_some()) {
         return false;
     }
-    let second = frames_per_second(session.frame_rate());
-    let (cursor, last) = (session.cursor(), session.last_frame());
+    let marks = Landmarks {
+        range: (session.range().start(), session.range().end()),
+        last: session.last_frame(),
+        frames_per_second: frames_per_second(session.frame_rate()),
+    };
+    let cursor = session.cursor();
     let jump = ui.input_mut(|i| {
         NAVIGATION
             .iter()
@@ -700,7 +727,7 @@ fn cursor_keys(ui: &mut egui::Ui, session: &mut Session) -> bool {
             .map(|(_, _, jump)| *jump)
     });
     if let Some(jump) = jump {
-        session.jump_cursor(jump_target(jump, cursor, last, second));
+        session.jump_cursor(jump_target(jump, cursor, &marks));
     }
 
     // + / − zoom the timeline around the cursor.
@@ -814,14 +841,21 @@ mod tests {
 
     #[test]
     fn navigation_jumps() {
-        let target = |jump| jump_target(jump, 1000, 5000, 60);
+        let marks = Landmarks {
+            range: (300, 2000),
+            last: 5000,
+            frames_per_second: 60,
+        };
+        let target = |jump| jump_target(jump, 1000, &marks);
         assert_eq!(target(Jump::Frames(-1)), 999);
         assert_eq!(target(Jump::Seconds(1)), 1060);
         assert_eq!(target(Jump::Seconds(-10)), 400);
+        assert_eq!(target(Jump::RangeStart), 300);
+        assert_eq!(target(Jump::RangeEnd), 2000);
         assert_eq!(target(Jump::First), 0);
         assert_eq!(target(Jump::Last), 5000);
         assert_eq!(
-            jump_target(Jump::Seconds(10), i64::MAX - 5, 0, 60),
+            jump_target(Jump::Seconds(10), i64::MAX - 5, &marks),
             i64::MAX
         );
     }

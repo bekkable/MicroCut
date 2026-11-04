@@ -29,6 +29,8 @@ pub struct Choices {
     pub quality: VideoQuality,
     pub audio: AudioCodec,
     pub kbps: u32,
+    /// Hardware acceleration wanted (used only where possible, see `hardware_in_use`).
+    pub hardware: bool,
 }
 
 impl Default for Choices {
@@ -38,11 +40,18 @@ impl Default for Choices {
             quality: VideoQuality::High,
             audio: AudioCodec::Aac,
             kbps: AudioCodec::Aac.default_bitrate(),
+            hardware: false,
         }
     }
 }
 
 impl Choices {
+    /// Whether the export uses hardware acceleration: wanted, an NVIDIA encoder for the chosen
+    /// codec exists (`hardware_codecs`), and the video needs no rotation.
+    fn hardware_in_use(&self, hardware_codecs: &[VideoCodec], rotated: bool) -> bool {
+        self.hardware && hardware_codecs.contains(&self.video) && !rotated
+    }
+
     /// The same choices, with codecs the installed FFmpeg lacks replaced by available ones.
     fn available_in(mut self, encoders: &Encoders) -> Choices {
         if !encoders.video.contains(&self.video)
@@ -177,6 +186,8 @@ impl ExportDialog {
 
     /// Codec, quality and audio rows, and what the export will contain.
     fn settings(&mut self, ui: &mut egui::Ui) {
+        let hardware_codecs = &self.encoders.hardware;
+        let rotated = self.media.video.rotation != 0;
         let choices = &mut self.choices;
         egui::Grid::new("export settings")
             .num_columns(2)
@@ -193,8 +204,13 @@ impl ExportDialog {
                         })
                         .response
                         .on_hover_text(video_hint(choices.video));
+                    let hardware = choices.hardware_in_use(hardware_codecs, rotated);
                     let label = |q: VideoQuality| {
-                        format!("{} (CRF {})", q.label(), choices.video.crf(q))
+                        if hardware {
+                            format!("{} (CQ {})", q.label(), choices.video.hardware_cq(q))
+                        } else {
+                            format!("{} (CRF {})", q.label(), choices.video.crf(q))
+                        }
                     };
                     egui::ComboBox::from_id_salt("video quality")
                         .selected_text(label(choices.quality))
@@ -205,6 +221,29 @@ impl ExportDialog {
                             }
                         });
                 });
+                ui.end_row();
+
+                ui.label("");
+                let possible = hardware_codecs.contains(&choices.video) && !rotated;
+                let hint = if rotated {
+                    "Not for rotated videos."
+                } else if !possible {
+                    "Your FFmpeg has no NVIDIA encoder for this codec."
+                } else {
+                    "Decodes on the graphics card (CUDA) and encodes with NVENC: much faster, \
+                     files about half again as large. Needs an NVIDIA graphics card."
+                };
+                let mut shown = choices.hardware && possible;
+                let checkbox = ui
+                    .add_enabled(
+                        possible,
+                        egui::Checkbox::new(&mut shown, "Hardware acceleration (NVIDIA)"),
+                    )
+                    .on_hover_text(hint)
+                    .on_disabled_hover_text(hint);
+                if checkbox.changed() {
+                    choices.hardware = shown;
+                }
                 ui.end_row();
 
                 ui.label("Audio");
@@ -267,7 +306,11 @@ impl ExportDialog {
                 let size = estimate_bytes(
                     &self.media,
                     frames,
-                    (choices.video, choices.quality),
+                    (
+                        choices.video,
+                        choices.quality,
+                        choices.hardware_in_use(hardware_codecs, rotated),
+                    ),
                     kbps,
                 );
                 ui.label(format!(
@@ -356,6 +399,9 @@ impl ExportDialog {
             count: self.range.frame_count(),
             video: self.choices.video,
             quality: self.choices.quality,
+            hardware: self
+                .choices
+                .hardware_in_use(&self.encoders.hardware, self.media.video.rotation != 0),
             audio: self.track.map(|track| AudioExport {
                 track,
                 codec: self.choices.audio,
@@ -599,6 +645,7 @@ mod tests {
         let encoders = Encoders {
             video: vec![VideoCodec::Av1],
             audio: vec![AudioCodec::Opus],
+            hardware: Vec::new(),
         };
         let choices = Choices::default().available_in(&encoders);
         assert_eq!(choices.video, VideoCodec::Av1);
@@ -609,6 +656,25 @@ mod tests {
             ..Choices::default()
         };
         assert_eq!(kept.available_in(&Encoders::default()), kept);
+    }
+
+    #[test]
+    fn hardware_is_used_only_where_possible() {
+        let wanted = Choices {
+            hardware: true,
+            ..Choices::default()
+        };
+        let nvenc = [VideoCodec::H264, VideoCodec::H265];
+        assert!(wanted.hardware_in_use(&nvenc, false));
+        assert!(!wanted.hardware_in_use(&nvenc, true), "rotated");
+        assert!(
+            !wanted.hardware_in_use(&[VideoCodec::H265], false),
+            "no h264_nvenc"
+        );
+        assert!(
+            !Choices::default().hardware_in_use(&nvenc, false),
+            "not wanted"
+        );
     }
 
     #[test]
