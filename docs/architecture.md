@@ -84,19 +84,20 @@ before FFmpeg 5.1), so picture n of a stream is frame `from + n` — exact for c
 nominal rate.
 
 Export (`MediaBackend::export`, `crates/media/src/ffmpeg.rs`) re-encodes, so it can cut at any frame: the video input
-seeks like playback and is limited to the frame count (`-frames:v`); the audio track is opened as a second input of the
-same file, seeked sample-exactly to the first frame's start, and both are cut to the range's duration (`-t`). The
-output file is created exclusively before ffmpeg runs (`-y` then only overwrites that empty file), so an existing file
-is never replaced, and it is removed again on failure or cancel. Progress comes from `-progress pipe:1`. With
-hardware acceleration the video input gets `-hwaccel cuda -hwaccel_output_format cuda` and the encoder is NVENC
-(`-rc vbr -cq`): pictures stay on the GPU, so a software encoder could not take them; `setpts` and `crop` work on GPU
-frames, the automatic rotation does not (rotated video is refused). The NVENC quality values
-(`VideoCodec::hardware_cq`) are calibrated with VMAF: per quality level, the CQ at which NVENC (preset p5) matches
-the VMAF of x264/x265 at the level's CRF, on four 10 s scenes of 720p60 recordings (menu and gameplay). VMAF needs a
+seeks like playback and is limited to the frame count (`trim=end_frame=…` in the filter, not `-frames:v`: before
+FFmpeg 5, reaching `-frames:v` ends every stream of the output and the file has no audio track); the audio track is
+opened as a second input of the same file, seeked sample-exactly to the first frame's start, and both are cut to the
+range's duration (`-t`). The output file is created exclusively before ffmpeg runs (`-y` then only overwrites that empty
+file), so an existing file is never replaced, and it is removed again on failure or cancel. Progress comes from
+`-progress pipe:1`. With hardware acceleration the video input gets `-hwaccel cuda -hwaccel_output_format cuda` and the
+encoder is NVENC (`-rc vbr -cq`): pictures stay on the GPU, so a software encoder could not take them; `setpts` and
+`crop` work on GPU frames, the automatic rotation does not (rotated video is refused). The NVENC quality values
+(`VideoCodec::hardware_cq`) are calibrated with VMAF: per quality level, the CQ at which NVENC (preset p5) matches the
+VMAF of x264/x265 at the level's CRF, on four 10 s scenes of 720p60 recordings (menu and gameplay). VMAF needs a
 reference with exactly the same frames: a lossless (`-qp 0`) encode of the range, compared frame by index
-(`settb=1/60,setpts=N` on both inputs) — comparing by timestamps mis-pairs frames of Matroska sources (1 ms
-timestamps) and drags even identical videos down to ~89.
-`crates/media/tests/export.rs` checks frame numbers, the audio track, every available codec, cancel and failure.
+(`settb=1/60,setpts=N` on both inputs) — comparing by timestamps mis-pairs frames of Matroska sources (1 ms timestamps)
+and drags even identical videos down to ~89. `crates/media/tests/export.rs` checks frame numbers, the audio track, every
+available codec, cancel and failure.
 
 Audio sync (`Session::audio_delay`, milliseconds in the UI) shifts the sound in playback and export alike
 (`MediaBackend::audio_stream` and `AudioExport::delay`): a stream starting at time `t` takes its sound from `t − delay`
@@ -111,8 +112,9 @@ FFmpeg versions (`crates/media/src/version.rs`): the backend reads `ffmpeg -vers
 thread, never while locating the programs). 4.4 is the minimum (`-stats_period`, NVENC presets `p1`–`p7`); anything
 older fails every operation with `MediaError::FfmpegTooOld`, which says to install a newer FFmpeg. Before 5.1 the
 pass-through option is `-vsync passthrough` (`-fps_mode` did not exist yet, and is the only option newer than 4.4).
-Development builds without a release number count as new. CI runs the integration tests with FFmpeg 4.4 (Ubuntu 22.04)
-and a current one.
+Export also avoids `-frames:v` (see §4), checked with FFmpeg 4.4 in an `ubuntu:22.04` container: frame count, audio
+length and tone onset match FFmpeg 6. Development builds without a release number count as new. CI runs the integration
+tests with FFmpeg 4.4 (Ubuntu 22.04) and a current one.
 
 ## 5. Release
 

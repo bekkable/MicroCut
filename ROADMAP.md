@@ -100,7 +100,8 @@ FFmpeg is not shipped: users install it themselves (see `NOTICE`).
   `release.yml` (a tag `v*` builds the three archives, adds `SHA256SUMS.txt` and opens a draft release)
 - [x] M6.3 App icon: original artwork, in the window, the Windows exe and the macOS bundle
 - [ ] M6.4 Older FFmpeg: the backend reads the version (`ffmpeg -version`) once; before 5.1 it passes
-  `-vsync passthrough` instead of `-fps_mode passthrough`, so FFmpeg 4.4 (Ubuntu 22.04) works; before 4.4 a clear
+  `-vsync passthrough` instead of `-fps_mode passthrough`, and the export counts frames with `trim` instead of
+  `-frames:v` (which drops the audio track before FFmpeg 5), so FFmpeg 4.4 (Ubuntu 22.04) works; before 4.4 a clear
   error says to install a newer FFmpeg. CI also runs the gates on Ubuntu 22.04 with its FFmpeg 4.4
 
 ## Later

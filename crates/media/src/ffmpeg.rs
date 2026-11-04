@@ -465,12 +465,14 @@ fn export_args(
 
     push(&["-map", "0:V:0"]);
     let codec = job.video;
-    // The video starts at time 0 like the audio; 4:2:0 video (what every player decodes) needs
-    // even sizes, so an odd last row or column is cropped.
-    push(&[
-        "-vf",
-        "setpts=PTS-STARTPTS,crop=trunc(iw/2)*2:trunc(ih/2)*2",
-    ]);
+    // Exactly `count` pictures (the seek makes the first frame the first one out). A filter, not
+    // `-frames:v`: before FFmpeg 5, reaching `-frames:v` ends every stream of the output, and
+    // the audio track is left out of the file. The video starts at time 0 like the audio; 4:2:0
+    // video (what every player decodes) needs even sizes, so an odd last row or column is
+    // cropped.
+    let video_filter =
+        format!("trim=end_frame={count},setpts=PTS-STARTPTS,crop=trunc(iw/2)*2:trunc(ih/2)*2");
+    push(&["-vf", &video_filter]);
     push(&FfmpegVersion::passthrough(version));
     if job.hardware {
         let cq = codec.hardware_cq(job.quality).to_string();
@@ -509,11 +511,8 @@ fn export_args(
             push(&["-af", filter]);
         }
     }
-    let frames = count.to_string();
     let duration = DecimalSecs(duration).to_string();
     push(&[
-        "-frames:v",
-        &frames,
         "-t",
         &duration,
         "-map_chapters",
@@ -636,6 +635,37 @@ mod tests {
             let args = export_args(&media(), &job, new).unwrap();
             assert!(has(&args, ["-fps_mode", "passthrough"]));
             assert!(!args.iter().any(|a| a == "-vsync"));
+        }
+    }
+
+    #[test]
+    fn export_counts_frames_with_a_filter() {
+        // FFmpeg 4.4 drops the audio track when `-frames:v` ends the video; `trim` does not.
+        let job = ExportJob {
+            output: PathBuf::from("/out/cut.mp4"),
+            from: 10,
+            count: 50,
+            video: VideoCodec::H264,
+            quality: crate::VideoQuality::High,
+            hardware: false,
+            audio: None,
+        };
+        for version in [version(4, 4), version(7, 1)] {
+            for hardware in [false, true] {
+                let job = ExportJob {
+                    hardware,
+                    ..job.clone()
+                };
+                let args = export_args(&media(), &job, version).unwrap();
+                assert!(!args.iter().any(|a| a == "-frames:v"), "{args:?}");
+                let filter = args
+                    .iter()
+                    .skip_while(|a| *a != "-vf")
+                    .nth(1)
+                    .and_then(|f| f.to_str())
+                    .unwrap();
+                assert!(filter.starts_with("trim=end_frame=50,"), "{filter}");
+            }
         }
     }
 
