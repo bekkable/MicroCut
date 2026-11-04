@@ -39,13 +39,21 @@ fn main() -> ExitCode {
     }
     let options = eframe::NativeOptions {
         viewport,
+        // Only what the app saves itself is kept (`MicroCutApp::save`), not the window.
+        persist_window: false,
         ..Default::default()
     };
 
     match eframe::run_native(
         "MicroCut",
         options,
-        Box::new(move |cc| Ok(Box::new(app::MicroCutApp::new(&cc.egui_ctx, initial)))),
+        Box::new(move |cc| {
+            Ok(Box::new(app::MicroCutApp::new(
+                &cc.egui_ctx,
+                cc.storage,
+                initial,
+            )))
+        }),
     ) {
         Ok(()) => ExitCode::SUCCESS,
         Err(err) => {

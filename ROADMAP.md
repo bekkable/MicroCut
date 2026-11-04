@@ -83,6 +83,10 @@ Each task has an id (`M<milestone>.<n>`); one task per commit.
   of the toolbar note — file name and folder, size and bit rate, frames, length, picture size, codec settings, audio
   track, encoding time, fps and speed against real time; "Show in folder" and "Close" (Enter). Fix: a duration that
   ffprobe rounds to microseconds no longer loses the last frame (`MediaInfo::frame_count`)
+- [x] M5.9 The export codecs (video codec, quality, hardware acceleration, audio codec and bit rate) are kept between
+  runs (eframe storage: `%APPDATA%\microcut\data\app.ron`, `~/Library/Application Support/microcut`,
+  `~/.local/share/microcut`); file name, audio track and sync are not, they belong to one video. An unreadable or
+  edited file falls back to the defaults
 
 ## M6 — Release
 

@@ -23,7 +23,8 @@ use microcut_time::{ClockStamp, Tick};
 use crate::report::{self, Report};
 use crate::{sync, tracks};
 
-/// Codec choices, remembered from one export to the next.
+/// Codec choices, remembered from one export to the next and between runs (the app saves them
+/// with eframe's storage). File name, audio track and sync are not: they belong to one video.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Choices {
     pub video: VideoCodec,
@@ -51,6 +52,58 @@ impl Choices {
     /// codec exists (`hardware_codecs`), and the video needs no rotation.
     fn hardware_in_use(&self, hardware_codecs: &[VideoCodec], rotated: bool) -> bool {
         self.hardware && hardware_codecs.contains(&self.video) && !rotated
+    }
+
+    /// The choices as saved between runs: `video=h264;quality=high;audio=aac;kbps=192;hardware=0`.
+    /// The names stay the same when labels change; [`Choices::from_setting`] reads them back.
+    pub fn to_setting(self) -> String {
+        let video = match self.video {
+            VideoCodec::H264 => "h264",
+            VideoCodec::H265 => "h265",
+            VideoCodec::Av1 => "av1",
+        };
+        let quality = match self.quality {
+            VideoQuality::High => "high",
+            VideoQuality::Medium => "medium",
+            VideoQuality::Small => "small",
+        };
+        let audio = match self.audio {
+            AudioCodec::Aac => "aac",
+            AudioCodec::Opus => "opus",
+        };
+        format!(
+            "video={video};quality={quality};audio={audio};kbps={};hardware={}",
+            self.kbps,
+            u8::from(self.hardware)
+        )
+    }
+
+    /// Reads [`Choices::to_setting`]. The file may be old, edited or broken: anything unknown or
+    /// missing keeps its default, and a bit rate the audio codec does not offer becomes its
+    /// default bit rate.
+    pub fn from_setting(text: &str) -> Choices {
+        let mut choices = Choices::default();
+        let mut kbps = None;
+        for (key, value) in text.split(';').filter_map(|pair| pair.split_once('=')) {
+            match (key.trim(), value.trim()) {
+                ("video", "h264") => choices.video = VideoCodec::H264,
+                ("video", "h265") => choices.video = VideoCodec::H265,
+                ("video", "av1") => choices.video = VideoCodec::Av1,
+                ("quality", "high") => choices.quality = VideoQuality::High,
+                ("quality", "medium") => choices.quality = VideoQuality::Medium,
+                ("quality", "small") => choices.quality = VideoQuality::Small,
+                ("audio", "aac") => choices.audio = AudioCodec::Aac,
+                ("audio", "opus") => choices.audio = AudioCodec::Opus,
+                ("kbps", value) => kbps = value.parse::<u32>().ok(),
+                ("hardware", "1") => choices.hardware = true,
+                ("hardware", "0") => choices.hardware = false,
+                _ => {}
+            }
+        }
+        choices.kbps = kbps
+            .filter(|k| choices.audio.bitrates().contains(k))
+            .unwrap_or(choices.audio.default_bitrate());
+        choices
     }
 
     /// The same choices, with codecs the installed FFmpeg lacks replaced by available ones.
@@ -750,6 +803,57 @@ mod tests {
             ..Choices::default()
         };
         assert_eq!(kept.available_in(&Encoders::default()), kept);
+    }
+
+    #[test]
+    fn choices_survive_a_restart() {
+        let mut all = Vec::new();
+        for video in VideoCodec::ALL {
+            for quality in VideoQuality::ALL {
+                for audio in AudioCodec::ALL {
+                    for &kbps in audio.bitrates() {
+                        for hardware in [false, true] {
+                            all.push(Choices {
+                                video,
+                                quality,
+                                audio,
+                                kbps,
+                                hardware,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+        for choices in all {
+            assert_eq!(Choices::from_setting(&choices.to_setting()), choices);
+        }
+        assert_eq!(
+            Choices::default().to_setting(),
+            "video=h264;quality=high;audio=aac;kbps=192;hardware=0"
+        );
+    }
+
+    #[test]
+    fn broken_settings_fall_back_to_defaults() {
+        assert_eq!(Choices::from_setting(""), Choices::default());
+        assert_eq!(Choices::from_setting("garbage;;=;x=y"), Choices::default());
+        assert_eq!(
+            Choices::from_setting("video=vp9;quality=best;kbps=-1;hardware=yes"),
+            Choices::default()
+        );
+        // A bit rate the codec does not offer, or none: the codec's default.
+        let opus = Choices::from_setting("audio=opus;kbps=256");
+        assert_eq!(
+            (opus.audio, opus.kbps),
+            (AudioCodec::Opus, AudioCodec::Opus.default_bitrate())
+        );
+        assert_eq!(Choices::from_setting("audio=opus").kbps, 128);
+        // Partial and spaced: what is readable is kept.
+        let partial = Choices::from_setting(" video = av1 ; hardware=1 ; future=1");
+        assert_eq!(partial.video, VideoCodec::Av1);
+        assert!(partial.hardware);
+        assert_eq!(partial.quality, VideoQuality::High);
     }
 
     #[test]

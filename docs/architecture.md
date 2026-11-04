@@ -42,10 +42,13 @@ Nothing below L5 depends on egui/eframe/winit/rfd/cpal, so the engine and media 
   1.5 thumbnails wide; thumbnails are decoded 1.5× larger and cropped to fill it.
 - **Export** (`apps/microcut/src/export.rs`) is a modal dialog: codecs and quality (only encoders the installed
   FFmpeg has), audio track, an estimate of the size, the file name (default `<stem>_hh-mm-ss-to-hh-mm-ss.mp4` next to
-  the original, ` (2)` if taken). The name rules, the preselected track and the estimate live in
-  `crates/engine/src/export.rs`. While it runs, the dialog shows progress (frames, fps, time left) and can cancel;
-  closing the app cancels too. Afterwards the same dialog shows what was written (`apps/microcut/src/report.rs`: the
-  file probed again, size, bit rate, settings, encoding time and speed) with "Show in folder" and "Close".
+  the original, ` (2)` if taken). The codec choices are kept between runs (`MicroCutApp::save`, eframe's storage,
+  key `export`, written as `video=h264;quality=high;…` by `Choices::to_setting`; nothing else is saved, not even the
+  window); file name, audio track and sync start fresh for each video. The name rules, the preselected track and the
+  estimate live in `crates/engine/src/export.rs`. While it runs, the dialog shows progress (frames, fps, time left) and
+  can cancel; closing the app cancels too. Afterwards the same dialog shows what was written
+  (`apps/microcut/src/report.rs`: the file probed again, size, bit rate, settings, encoding time and speed) with "Show
+  in folder" and "Close".
 
 ## 3. Threads
 

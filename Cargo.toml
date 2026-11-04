@@ -23,6 +23,8 @@ eframe = { version = "0.37", default-features = false, features = [
     "accesskit",
     "clipboard",
     "default_fonts",
+    # Settings kept between runs (export codecs); adds `ron` (MIT OR Apache-2.0).
+    "persistence",
     "wayland",
     "wgpu",
     "x11",

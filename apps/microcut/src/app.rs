@@ -24,6 +24,9 @@ const VIDEO_EXTENSIONS: &[&str] = &[
     "3gp", "ogv", "mxf",
 ];
 
+/// Storage key of the export codec choices (see [`Choices::to_setting`]).
+const EXPORT_CHOICES_KEY: &str = "export";
+
 /// Picture size for playback before the preview has been laid out.
 const FALLBACK_PLAY_SIZE: (u32, u32) = (1280, 720);
 
@@ -88,8 +91,13 @@ impl Transport {
 }
 
 impl MicroCutApp {
-    /// Creates the app and starts opening `initial` (from the command line), if given.
-    pub fn new(ctx: &egui::Context, initial: Option<PathBuf>) -> MicroCutApp {
+    /// Creates the app with the settings in `storage` (from the last run) and starts opening
+    /// `initial` (from the command line), if given.
+    pub fn new(
+        ctx: &egui::Context,
+        storage: Option<&dyn eframe::Storage>,
+        initial: Option<PathBuf>,
+    ) -> MicroCutApp {
         let backend = FfmpegBackend::locate()
             .map(|b| Arc::new(b) as Arc<dyn MediaBackend>)
             .map_err(|err| err.to_string());
@@ -106,7 +114,13 @@ impl MicroCutApp {
             transport: Transport::default(),
             volume: Volume::default(),
             document: Document::Empty,
-            exports: Exports::default(),
+            exports: Exports {
+                choices: storage
+                    .and_then(|s| s.get_string(EXPORT_CHOICES_KEY))
+                    .map(|text| Choices::from_setting(&text))
+                    .unwrap_or_default(),
+                ..Exports::default()
+            },
             ctx: ctx.clone(),
         };
         if let Some(path) = initial {
@@ -454,6 +468,17 @@ impl MicroCutApp {
 }
 
 impl eframe::App for MicroCutApp {
+    /// Keeps the export codecs for the next run (not the file name, audio track or sync, which
+    /// belong to one video).
+    fn save(&mut self, storage: &mut dyn eframe::Storage) {
+        storage.set_string(EXPORT_CHOICES_KEY, self.exports.choices.to_setting());
+    }
+
+    /// egui's own state (open menus, scroll positions) starts fresh.
+    fn persist_egui_memory(&self) -> bool {
+        false
+    }
+
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         self.handle_input(ui);
         self.poll_probe();
