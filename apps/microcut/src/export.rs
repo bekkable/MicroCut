@@ -2,7 +2,7 @@
 //! progress and cancel.
 
 use std::panic::{self, AssertUnwindSafe};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::sync::mpsc::{self, Receiver, TryRecvError};
@@ -15,11 +15,12 @@ use microcut_engine::{
     free_file_name,
 };
 use microcut_media::{
-    AudioCodec, AudioExport, Encoders, ExportEnd, ExportJob, MediaBackend, MediaInfo, VideoCodec,
-    VideoQuality,
+    AudioCodec, AudioExport, Encoders, ExportEnd, ExportJob, MediaBackend, MediaError, MediaInfo,
+    VideoCodec, VideoQuality,
 };
 use microcut_time::{ClockStamp, Tick};
 
+use crate::report::{self, Report};
 use crate::{sync, tracks};
 
 /// Codec choices, remembered from one export to the next.
@@ -76,10 +77,8 @@ impl Choices {
 pub enum Outcome {
     /// Stay open.
     Open,
-    /// Closed without exporting.
+    /// Closed (after an export or without one).
     Closed,
-    /// Closed after writing this file.
-    Exported(PathBuf),
 }
 
 /// A message under the settings.
@@ -102,6 +101,8 @@ pub struct ExportDialog {
     name: String,
     note: Option<Note>,
     running: Option<ExportTask>,
+    /// The export is done: the dialog shows what was written.
+    finished: Option<Box<Report>>,
     /// Set after the first frame: the Enter that opened the dialog must not also encode.
     armed: bool,
 }
@@ -139,6 +140,7 @@ impl ExportDialog {
             name,
             note: None,
             running: None,
+            finished: None,
             armed: false,
         })
     }
@@ -160,7 +162,10 @@ impl ExportDialog {
 
     /// Shows the dialog; starts, follows and ends the export.
     pub fn show(&mut self, ctx: &egui::Context, backend: &Arc<dyn MediaBackend>) -> Outcome {
-        if let Some(outcome) = self.poll_export() {
+        self.poll_export();
+        if let Some(report) = self.finished.take() {
+            let outcome = self.show_report(ctx, &report);
+            self.finished = Some(report);
             return outcome;
         }
         let modal = egui::Modal::new(egui::Id::unique("export")).show(ctx, |ui| {
@@ -437,17 +442,56 @@ impl ExportDialog {
     }
 
     /// Ends the running export once its result is in.
-    fn poll_export(&mut self) -> Option<Outcome> {
-        let result = self.running.as_ref()?.poll()?;
-        let task = self.running.take()?;
+    fn poll_export(&mut self) {
+        let Some(result) = self.running.as_ref().and_then(ExportTask::poll) else {
+            return;
+        };
+        self.running = None;
         match result {
-            Ok(ExportEnd::Finished) => return Some(Outcome::Exported(task.output.clone())),
-            Ok(ExportEnd::Cancelled) => {
+            Ok(Ended::Finished(report)) => {
+                self.note = None;
+                self.finished = Some(report);
+            }
+            Ok(Ended::Cancelled) => {
                 self.note = Some(Note::Info("Export cancelled.".to_owned()));
             }
             Err(message) => self.note = Some(Note::Error(message)),
         }
-        None
+    }
+
+    /// The finished export: file name, facts about the file and the encoding, Show in folder and
+    /// Close (Enter, Escape).
+    fn show_report(&mut self, ctx: &egui::Context, report: &Report) -> Outcome {
+        let mut outcome = Outcome::Open;
+        let modal = egui::Modal::new(egui::Id::unique("export finished")).show(ctx, |ui| {
+            ui.set_width(560.0);
+            ui.heading("Export finished");
+            ui.add_space(8.0);
+            report::show(ui, report, &self.media);
+            ui.add_space(8.0);
+            if let Some(Note::Error(text)) = &self.note {
+                ui.colored_label(ui.visuals().error_fg_color, text);
+                ui.add_space(8.0);
+            }
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                let close = ui.button("Close");
+                if close.clicked() || ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                    outcome = Outcome::Closed;
+                }
+                let folder = ui
+                    .button("Show in folder")
+                    .on_hover_text(report.job.output.display().to_string());
+                if folder.clicked()
+                    && let Err(message) = show_in_folder(&report.job.output)
+                {
+                    self.note = Some(Note::Error(capitalize(&message)));
+                }
+            });
+        });
+        if modal.should_close() {
+            outcome = Outcome::Closed;
+        }
+        outcome
     }
 }
 
@@ -471,6 +515,9 @@ fn progress(ui: &mut egui::Ui, task: &ExportTask) {
     };
     ui.add(egui::ProgressBar::new(fraction).show_percentage());
     let mut text = format!("{done} / {} frames", task.total);
+    if let Some(fps) = task.frames_per_second() {
+        text.push_str(&format!(" · {fps:.0} fps"));
+    }
     if let Some(left) = task.time_left() {
         text.push_str(&format!(" · about {} left", format_duration(left)));
     }
@@ -478,7 +525,7 @@ fn progress(ui: &mut egui::Ui, task: &ExportTask) {
 }
 
 /// `850 KB`, `4.4 MB`, `1.2 GB` (decimal units, as file managers show them).
-fn format_size(bytes: u64) -> String {
+pub(crate) fn format_size(bytes: u64) -> String {
     let b = bytes as f64;
     if b < 1e6 {
         format!("{:.0} KB", (b / 1e3).max(1.0))
@@ -490,7 +537,7 @@ fn format_size(bytes: u64) -> String {
 }
 
 /// `45 s`, `3 min 05 s`, `1 h 02 min`.
-fn format_duration(d: Duration) -> String {
+pub(crate) fn format_duration(d: Duration) -> String {
     let secs = d.as_secs();
     if secs < 60 {
         format!("{secs} s")
@@ -501,15 +548,20 @@ fn format_duration(d: Duration) -> String {
     }
 }
 
+/// How an export ended without an error.
+enum Ended {
+    Finished(Box<Report>),
+    Cancelled,
+}
+
 /// An export running on a worker thread. Dropping it cancels the export and waits for ffmpeg to
 /// stop (the partial file is removed).
 struct ExportTask {
-    output: PathBuf,
     total: i64,
     started: Instant,
     done: Arc<AtomicI64>,
     cancel: Arc<AtomicBool>,
-    rx: Receiver<Result<ExportEnd, String>>,
+    rx: Receiver<Result<Ended, String>>,
     worker: Option<JoinHandle<()>>,
 }
 
@@ -523,20 +575,37 @@ impl ExportTask {
         let (tx, rx) = mpsc::channel();
         let done = Arc::new(AtomicI64::new(0));
         let cancel = Arc::new(AtomicBool::new(false));
-        let (output, total) = (job.output.clone(), job.count);
+        let total = job.count;
         let (worker_done, worker_cancel, worker_tx) =
             (Arc::clone(&done), Arc::clone(&cancel), tx.clone());
         let spawned = thread::Builder::new()
             .name("microcut-export".to_owned())
             .spawn(move || {
-                let mut report = |frames: i64| {
+                let mut progress = |frames: i64| {
                     worker_done.store(frames, Ordering::Relaxed);
                     ctx.request_repaint();
                     !worker_cancel.load(Ordering::Relaxed)
                 };
-                let run = || backend.export(&media, &job, &mut report);
+                let run = || {
+                    let started = Instant::now();
+                    match backend.export(&media, &job, &mut progress)? {
+                        ExportEnd::Cancelled => Ok(Ended::Cancelled),
+                        ExportEnd::Finished => {
+                            let elapsed = started.elapsed();
+                            // What was really written; the report falls back to the job.
+                            let bytes = std::fs::metadata(&job.output).ok().map(|m| m.len());
+                            let written = backend.probe(&job.output).ok();
+                            Ok(Ended::Finished(Box::new(Report {
+                                job,
+                                elapsed,
+                                bytes,
+                                written,
+                            })))
+                        }
+                    }
+                };
                 let result = match panic::catch_unwind(AssertUnwindSafe(run)) {
-                    Ok(result) => result.map_err(|err| capitalize(&err.to_string())),
+                    Ok(result) => result.map_err(|err: MediaError| capitalize(&err.to_string())),
                     Err(_) => Err("Internal error during the export.".to_owned()),
                 };
                 let _ = worker_tx.send(result);
@@ -550,7 +619,6 @@ impl ExportTask {
             }
         };
         ExportTask {
-            output,
             total,
             started: Instant::now(),
             done,
@@ -560,7 +628,7 @@ impl ExportTask {
         }
     }
 
-    fn poll(&self) -> Option<Result<ExportEnd, String>> {
+    fn poll(&self) -> Option<Result<Ended, String>> {
         match self.rx.try_recv() {
             Ok(result) => Some(result),
             Err(TryRecvError::Empty) => None,
@@ -578,6 +646,13 @@ impl ExportTask {
         self.done
             .load(Ordering::Relaxed)
             .clamp(0, self.total.max(0))
+    }
+
+    /// Frames encoded per second so far, once there is enough to go by.
+    fn frames_per_second(&self) -> Option<f64> {
+        let done = self.frames_done();
+        let secs = self.started.elapsed().as_secs_f64();
+        (done > 0 && secs >= 0.5).then(|| done as f64 / secs)
     }
 
     /// Estimated from the speed so far, once there is enough to go by.

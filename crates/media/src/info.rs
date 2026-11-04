@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use microcut_time::{FrameRate, Tick};
+use microcut_time::{FrameRate, TICKS_PER_SECOND, Tick};
 
 /// Container and stream information of an opened video.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -21,8 +21,15 @@ pub struct MediaInfo {
 
 impl MediaInfo {
     /// Number of whole frames, derived from duration and frame rate.
+    ///
+    /// ffprobe prints durations with six decimals, so 3800 frames at 60 fps arrive as
+    /// `63.333333` s, a hair short of the last frame's end; up to a microsecond short still
+    /// counts as a whole frame.
     pub fn frame_count(&self) -> i64 {
-        self.video.frame_rate.tick_to_frame(self.duration)
+        let tolerance = Tick(TICKS_PER_SECOND / 1_000_000);
+        self.video
+            .frame_rate
+            .tick_to_frame(self.duration.saturating_add(tolerance))
     }
 
     /// File name for display; falls back to the full path.
@@ -74,4 +81,39 @@ pub struct AudioInfo {
     pub title: Option<String>,
     /// Language tag, e.g. `eng`, if set and not `und`.
     pub language: Option<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn media(fps: (u32, u32), duration: &str) -> MediaInfo {
+        MediaInfo {
+            path: PathBuf::from("clip.mp4"),
+            container: "mp4".to_owned(),
+            start: Tick::ZERO,
+            duration: Tick::parse_decimal_secs(duration).unwrap(),
+            video: VideoInfo {
+                codec: "h264".to_owned(),
+                width: 1280,
+                height: 720,
+                frame_rate: FrameRate::new(fps.0, fps.1).unwrap(),
+                rotation: 0,
+            },
+            audio: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn rounded_durations_count_whole_frames() {
+        // 3800 frames at 60 fps, as ffprobe prints it.
+        assert_eq!(media((60, 1), "63.333333").frame_count(), 3800);
+        assert_eq!(media((60, 1), "63.333334").frame_count(), 3800);
+        // 1001 frames at 29.97 fps = 33.400033… s.
+        assert_eq!(media((30_000, 1_001), "33.400033").frame_count(), 1001);
+        // A real part of a frame does not count.
+        assert_eq!(media((60, 1), "63.330000").frame_count(), 3799);
+        assert_eq!(media((25, 1), "2.000000").frame_count(), 50);
+        assert_eq!(media((25, 1), "0.000000").frame_count(), 0);
+    }
 }

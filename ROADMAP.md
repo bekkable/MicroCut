@@ -79,6 +79,10 @@ Each task has an id (`M<milestone>.<n>`); one task per commit.
 - [x] M5.7 Audio sync: `Sync ◀ [+0 ms] ▶` left of the audio tracks in the status line and in the export dialog —
   milliseconds typed in (+ = sound later, ±10 s) or ±50 ms per arrow; shifts the sound in playback and export
   (silence where it reaches back before the start of the video); kept per opened video
+- [x] M5.8 Feedback: encoding speed (fps) in the progress line; after the export the dialog shows the result instead
+  of the toolbar note — file name and folder, size and bit rate, frames, length, picture size, codec settings, audio
+  track, encoding time, fps and speed against real time; "Show in folder" and "Close" (Enter). Fix: a duration that
+  ffprobe rounds to microseconds no longer loses the last frame (`MediaInfo::frame_count`)
 
 ## Later
 

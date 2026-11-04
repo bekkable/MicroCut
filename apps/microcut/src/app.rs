@@ -8,7 +8,7 @@ use microcut_engine::{RangeEnd, Session};
 use microcut_media::{Encoders, FfmpegBackend, MediaBackend, MediaInfo};
 use microcut_time::{ClockStamp, FrameRate};
 
-use crate::export::{self, Choices, ExportDialog, Outcome};
+use crate::export::{Choices, ExportDialog, Outcome};
 use crate::loader::ProbeJob;
 use crate::playback::{Playback, Step, stop_frame};
 use crate::preview::Preview;
@@ -67,8 +67,6 @@ struct Exports {
     choices: Choices,
     /// The encoders of the installed FFmpeg, asked once.
     encoders: Option<Encoders>,
-    /// The file written last, shown in the status line.
-    done: Option<PathBuf>,
 }
 
 /// Playback state.
@@ -119,7 +117,6 @@ impl MicroCutApp {
 
     fn open(&mut self, path: PathBuf) {
         self.transport = Transport::default();
-        self.exports.done = None;
         self.document = match &self.backend {
             Ok(backend) => {
                 Document::Probing(ProbeJob::start(Arc::clone(backend), path, self.ctx.clone()))
@@ -226,10 +223,6 @@ impl MicroCutApp {
         match outcome {
             Outcome::Open => {}
             Outcome::Closed => self.exports.dialog = None,
-            Outcome::Exported(path) => {
-                self.exports.dialog = None;
-                self.exports.done = Some(path);
-            }
         }
     }
 
@@ -405,17 +398,6 @@ impl MicroCutApp {
             if export.clicked() {
                 export.surrender_focus();
                 self.open_export();
-            }
-            if let Some(path) = &self.exports.done {
-                ui.add_space(8.0);
-                ui.label(format!("Exported {}", display_name(path)));
-                let hint = path.display().to_string();
-                if quiet_button(ui, "Show in folder", &hint).clicked()
-                    && let Err(message) = export::show_in_folder(path)
-                {
-                    self.transport.message = Some(message);
-                }
-                ui.add_space(8.0);
             }
             let summary = match &self.document {
                 Document::Loaded(session) => {
@@ -848,7 +830,7 @@ fn display_name(path: &Path) -> String {
 }
 
 /// `25 fps`, `29.97 fps`, `23.976 fps` (display only; edit math stays rational).
-fn format_fps(rate: FrameRate) -> String {
+pub(crate) fn format_fps(rate: FrameRate) -> String {
     if rate.den() == 1 {
         return format!("{} fps", rate.num());
     }
