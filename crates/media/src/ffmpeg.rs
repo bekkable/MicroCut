@@ -4,6 +4,7 @@ use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::io;
 use std::path::{self, Path, PathBuf};
+use std::sync::OnceLock;
 use std::time::Duration;
 
 use microcut_time::{DecimalSecs, TICKS_PER_SECOND, Tick};
@@ -13,6 +14,7 @@ use crate::frame::{self, fit_within, rgba_len};
 use crate::locate::{find_tool, search_dirs};
 use crate::process::{self, Limits, Streaming};
 use crate::stream::{self, FfmpegAudioStream, FfmpegVideoStream};
+use crate::version::FfmpegVersion;
 use crate::{
     AudioFormat, AudioStream, Encoders, ExportEnd, ExportJob, MediaBackend, MediaError, MediaInfo,
     VideoCodec, VideoFrame, VideoStream, probe,
@@ -27,11 +29,19 @@ const PROBE_LIMITS: Limits = Limits {
 /// Seeking decodes from the previous keyframe, which can be seconds of video.
 const FRAME_TIMEOUT: Duration = Duration::from_secs(20);
 
+const VERSION_LIMITS: Limits = Limits {
+    timeout: Duration::from_secs(15),
+    max_stdout: 64 * 1024,
+    max_stderr: 64 * 1024,
+};
+
 /// Media backend using the `ffmpeg` and `ffprobe` programs.
 #[derive(Debug, Clone)]
 pub struct FfmpegBackend {
     ffmpeg: PathBuf,
     ffprobe: PathBuf,
+    /// Read on first use (so finding the programs never waits for one to run).
+    version: OnceLock<Option<FfmpegVersion>>,
 }
 
 impl FfmpegBackend {
@@ -43,7 +53,29 @@ impl FfmpegBackend {
         Ok(FfmpegBackend {
             ffmpeg: find("ffmpeg")?,
             ffprobe: find("ffprobe")?,
+            version: OnceLock::new(),
         })
+    }
+
+    /// The version of `ffmpeg` (`ffmpeg -version`, read once); `None` for development builds
+    /// without a release number, and if it could not be read: both are treated as new.
+    pub fn version(&self) -> Option<FfmpegVersion> {
+        *self.version.get_or_init(|| {
+            let output =
+                process::run("ffmpeg", &self.ffmpeg, ["-version"], &VERSION_LIMITS).ok()?;
+            FfmpegVersion::parse(&String::from_utf8_lossy(&output.stdout))
+        })
+    }
+
+    /// The version, or an error if it is older than [`FfmpegVersion::MINIMUM`]. Every operation
+    /// checks first, so a too old FFmpeg says so instead of failing on an unknown option.
+    fn checked_version(&self) -> Result<Option<FfmpegVersion>, MediaError> {
+        match self.version() {
+            Some(found) if found < FfmpegVersion::MINIMUM => {
+                Err(MediaError::FfmpegTooOld { found })
+            }
+            version => Ok(version),
+        }
     }
 
     /// Path of the `ffmpeg` executable.
@@ -59,6 +91,8 @@ impl FfmpegBackend {
 
 impl MediaBackend for FfmpegBackend {
     fn probe(&self, path: &Path) -> Result<MediaInfo, MediaError> {
+        // Opening a video probes it first: the place to tell that FFmpeg is too old.
+        self.checked_version()?;
         // An absolute path can never be mistaken for a command-line option ("-…").
         let path = path::absolute(path).map_err(|_| MediaError::FileNotFound(path.into()))?;
         if !path.is_file() {
@@ -87,6 +121,7 @@ impl MediaBackend for FfmpegBackend {
         frame: i64,
         max_size: (u32, u32),
     ) -> Result<VideoFrame, MediaError> {
+        self.checked_version()?;
         let frame = frame::clamp_frame(media, frame);
         let (width, height) = fit_within(media.video.display_size(), max_size);
         let expected = rgba_len(width, height).ok_or(MediaError::BadFrame {
@@ -150,6 +185,7 @@ impl MediaBackend for FfmpegBackend {
         count: i64,
         max_size: (u32, u32),
     ) -> Result<Box<dyn VideoStream>, MediaError> {
+        let [pass_option, pass_value] = FfmpegVersion::passthrough(self.checked_version()?);
         let from = frame::clamp_frame(media, from);
         let count = count.clamp(1, media.frame_count().saturating_sub(from).max(1));
         let (width, height) = fit_within(media.video.display_size(), max_size);
@@ -176,8 +212,8 @@ impl MediaBackend for FfmpegBackend {
             OsStr::new("0:V:0"),
             OsStr::new("-frames:v"),
             OsStr::new(&count_arg),
-            OsStr::new("-fps_mode"),
-            OsStr::new("passthrough"),
+            OsStr::new(pass_option),
+            OsStr::new(pass_value),
             OsStr::new("-vf"),
             OsStr::new(&scale),
             OsStr::new("-pix_fmt"),
@@ -204,6 +240,7 @@ impl MediaBackend for FfmpegBackend {
         delay: Tick,
         format: AudioFormat,
     ) -> Result<Box<dyn AudioStream>, MediaError> {
+        self.checked_version()?;
         if track >= media.audio.len() {
             return Err(MediaError::NoAudioStream);
         }
@@ -266,6 +303,7 @@ impl MediaBackend for FfmpegBackend {
     }
 
     fn encoders(&self) -> Result<Encoders, MediaError> {
+        self.checked_version()?;
         let limits = Limits {
             timeout: Duration::from_secs(15),
             max_stdout: 1024 * 1024,
@@ -288,7 +326,7 @@ impl MediaBackend for FfmpegBackend {
         job: &ExportJob,
         progress: &mut dyn FnMut(i64) -> bool,
     ) -> Result<ExportEnd, MediaError> {
-        let args = export_args(media, job)?;
+        let args = export_args(media, job, self.checked_version()?)?;
         let output = path::absolute(&job.output).map_err(|source| MediaError::CreateOutput {
             path: job.output.clone(),
             source,
@@ -368,8 +406,12 @@ fn run_export<'a>(
 /// Valid audio bit rates in kbit/s.
 const AUDIO_KBPS: std::ops::RangeInclusive<u32> = 8..=1024;
 
-/// Every ffmpeg argument of an export except the output.
-fn export_args(media: &MediaInfo, job: &ExportJob) -> Result<Vec<OsString>, MediaError> {
+/// Every ffmpeg argument of an export except the output, for ffmpeg `version`.
+fn export_args(
+    media: &MediaInfo,
+    job: &ExportJob,
+    version: Option<FfmpegVersion>,
+) -> Result<Vec<OsString>, MediaError> {
     if job.count < 1 {
         return Err(MediaError::BadExport("the range is empty"));
     }
@@ -428,9 +470,8 @@ fn export_args(media: &MediaInfo, job: &ExportJob) -> Result<Vec<OsString>, Medi
     push(&[
         "-vf",
         "setpts=PTS-STARTPTS,crop=trunc(iw/2)*2:trunc(ih/2)*2",
-        "-fps_mode",
-        "passthrough",
     ]);
+    push(&FfmpegVersion::passthrough(version));
     if job.hardware {
         let cq = codec.hardware_cq(job.quality).to_string();
         push(&[
@@ -541,6 +582,87 @@ mod tests {
         // Hostile values saturate.
         assert_eq!(audio_source(Tick(i64::MAX), Tick(i64::MIN)).1, Tick::ZERO);
         assert!(audio_source(Tick(i64::MIN), Tick(i64::MAX)).1 > Tick::ZERO);
+    }
+
+    fn media() -> MediaInfo {
+        MediaInfo {
+            path: PathBuf::from("/videos/clip.mp4"),
+            container: "mp4".to_owned(),
+            start: Tick::ZERO,
+            duration: Tick::from_secs(10),
+            video: crate::VideoInfo {
+                codec: "h264".to_owned(),
+                width: 1280,
+                height: 720,
+                frame_rate: microcut_time::FrameRate::new(25, 1).unwrap(),
+                rotation: 0,
+            },
+            audio: Vec::new(),
+        }
+    }
+
+    fn backend_with(version: Option<FfmpegVersion>) -> FfmpegBackend {
+        FfmpegBackend {
+            ffmpeg: PathBuf::from("no/such/ffmpeg"),
+            ffprobe: PathBuf::from("no/such/ffprobe"),
+            version: OnceLock::from(version),
+        }
+    }
+
+    fn version(major: u32, minor: u32) -> Option<FfmpegVersion> {
+        Some(FfmpegVersion { major, minor })
+    }
+
+    #[test]
+    fn export_passes_pictures_through_on_every_version() {
+        let job = ExportJob {
+            output: PathBuf::from("/out/cut.mp4"),
+            from: 0,
+            count: 50,
+            video: VideoCodec::H264,
+            quality: crate::VideoQuality::High,
+            hardware: false,
+            audio: None,
+        };
+        let has = |args: &[OsString], pair: [&str; 2]| {
+            args.windows(2).any(|w| {
+                w.first().is_some_and(|a| a == pair[0]) && w.get(1).is_some_and(|b| b == pair[1])
+            })
+        };
+        let old = export_args(&media(), &job, version(4, 4)).unwrap();
+        assert!(has(&old, ["-vsync", "passthrough"]));
+        assert!(!old.iter().any(|a| a == "-fps_mode"));
+        for new in [version(5, 1), version(7, 1), None] {
+            let args = export_args(&media(), &job, new).unwrap();
+            assert!(has(&args, ["-fps_mode", "passthrough"]));
+            assert!(!args.iter().any(|a| a == "-vsync"));
+        }
+    }
+
+    #[test]
+    fn too_old_ffmpeg_says_so_first() {
+        let backend = backend_with(version(4, 3));
+        let err = backend.probe(Path::new("/videos/clip.mp4")).unwrap_err();
+        assert!(matches!(err, MediaError::FfmpegTooOld { .. }), "{err}");
+        assert!(
+            err.to_string()
+                .starts_with("FFmpeg 4.3 is too old: MicroCut needs FFmpeg 4.4 or newer.")
+        );
+        assert!(matches!(
+            backend.decode_frame(&media(), 0, (64, 64)),
+            Err(MediaError::FfmpegTooOld { .. })
+        ));
+        assert!(matches!(
+            backend.encoders(),
+            Err(MediaError::FfmpegTooOld { .. })
+        ));
+        // Old enough, or a development build: on to the real work (here: the file is missing).
+        for ok in [version(4, 4), None] {
+            let err = backend_with(ok)
+                .probe(Path::new("/no/such/clip.mp4"))
+                .unwrap_err();
+            assert!(matches!(err, MediaError::FileNotFound(_)), "{err}");
+        }
     }
 
     #[test]

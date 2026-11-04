@@ -75,9 +75,10 @@ keyframe and drops frames before the target, and container timestamps may be rou
 the exact start could skip the frame. `crates/media/tests/decode.rs` proves it with fixtures whose frames encode their
 own number in their brightness.
 
-Playback streams seek the same way and pass every decoded picture through unchanged (`-fps_mode passthrough`), so
-picture n of a stream is frame `from + n` — exact for constant-frame-rate video, which `crates/media/tests/stream.rs`
-checks in MP4 and Matroska. Variable-frame-rate video plays with pictures shown at the nominal rate.
+Playback streams seek the same way and pass every decoded picture through unchanged (`-fps_mode passthrough`; `-vsync`
+before FFmpeg 5.1), so picture n of a stream is frame `from + n` — exact for constant-frame-rate video, which
+`crates/media/tests/stream.rs` checks in MP4 and Matroska. Variable-frame-rate video plays with pictures shown at the
+nominal rate.
 
 Export (`MediaBackend::export`, `crates/media/src/ffmpeg.rs`) re-encodes, so it can cut at any frame: the video input
 seeks like playback and is limited to the frame count (`-frames:v`); the audio track is opened as a second input of the
@@ -103,6 +104,13 @@ stays frame-exact and the sound covers the same span (it ends early only where t
 The frame count comes from the video stream's duration when the container has one (the container duration also covers
 longer audio), else from the container duration.
 
+FFmpeg versions (`crates/media/src/version.rs`): the backend reads `ffmpeg -version` once, on first use (on a worker
+thread, never while locating the programs). 4.4 is the minimum (`-stats_period`, NVENC presets `p1`–`p7`); anything
+older fails every operation with `MediaError::FfmpegTooOld`, which says to install a newer FFmpeg. Before 5.1 the
+pass-through option is `-vsync passthrough` (`-fps_mode` did not exist yet, and is the only option newer than 4.4).
+Development builds without a release number count as new. CI runs the integration tests with FFmpeg 4.4 (Ubuntu 22.04)
+and a current one.
+
 ## 5. Release
 
 `cargo xtask dist` (`xtask/src/dist.rs`) builds the release binary and packs it with README, licenses and NOTICE into
@@ -117,7 +125,8 @@ and `icon.ico`; both are committed. The window gets `icon.png` at run time, `app
 and the version information into the Windows exe (`winresource`, the SDK's `rc.exe`; without it the build only warns),
 and `cargo xtask dist` turns `icon.png` into the bundle's `MicroCut.icns` (`sips`, `iconutil`).
 
-GitHub Actions: `.github/workflows/ci.yml` runs `cargo xtask ci` on Windows, macOS and Ubuntu 24.04 with FFmpeg
-installed (pushes to `main`, pull requests). `.github/workflows/release.yml` runs on a tag `v<version>`: it checks the
-tag against the version in `Cargo.toml`, runs the CI workflow, builds the three archives (Linux on Ubuntu 22.04 for an
-older glibc) and creates a draft release with them and `SHA256SUMS.txt`, to be published by hand.
+GitHub Actions: `.github/workflows/ci.yml` runs `cargo xtask ci` on Windows, macOS, Ubuntu 22.04 (FFmpeg 4.4) and
+Ubuntu 24.04 with FFmpeg installed (pushes to `main`, pull requests). `.github/workflows/release.yml` runs on a tag
+`v<version>`: it checks the tag against the version in `Cargo.toml`, runs the CI workflow, builds the three archives
+(Linux on Ubuntu 22.04 for an older glibc) and creates a draft release with them and `SHA256SUMS.txt`, to be published
+by hand.

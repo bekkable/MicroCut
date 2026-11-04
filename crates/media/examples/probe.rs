@@ -18,6 +18,14 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
+    let version = backend
+        .version()
+        .map_or_else(|| "development build".to_owned(), |v| v.to_string());
+    println!(
+        "ffmpeg {} ({version}), ffprobe {}",
+        backend.ffmpeg_path().display(),
+        backend.ffprobe_path().display()
+    );
     let mut failed = false;
     for arg in std::env::args_os().skip(1) {
         let path = Path::new(&arg);

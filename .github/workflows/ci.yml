@@ -21,8 +21,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Linux: 24.04, because MicroCut needs FFmpeg 5.1 or newer (22.04 packages 4.4).
-        os: [windows-latest, macos-latest, ubuntu-24.04]
+        # Linux twice: 22.04 packages FFmpeg 4.4 (the oldest MicroCut supports, `-vsync` instead of
+        # `-fps_mode`), 24.04 a current one.
+        os: [windows-latest, macos-latest, ubuntu-22.04, ubuntu-24.04]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4

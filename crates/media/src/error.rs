@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
 use crate::locate::FFMPEG_DIR_ENV;
+use crate::version::FfmpegVersion;
 
 /// Errors from the media backend. The `Display` text is shown to the user as is.
 #[derive(Debug, thiserror::Error)]
@@ -13,6 +14,17 @@ pub enum MediaError {
     ToolNotFound {
         /// Name of the missing program.
         tool: &'static str,
+    },
+
+    /// The installed FFmpeg is older than [`FfmpegVersion::MINIMUM`].
+    #[error(
+        "FFmpeg {found} is too old: MicroCut needs FFmpeg {} or newer. Install a newer FFmpeg, or put \
+         ffmpeg and ffprobe of a newer version next to MicroCut or into the folder named by {FFMPEG_DIR_ENV}.",
+        FfmpegVersion::MINIMUM
+    )]
+    FfmpegTooOld {
+        /// The version found.
+        found: FfmpegVersion,
     },
 
     /// The input file does not exist or is not a regular file.

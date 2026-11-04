@@ -16,6 +16,7 @@ mod locate;
 mod probe;
 mod process;
 mod stream;
+mod version;
 
 use std::path::Path;
 
@@ -29,6 +30,7 @@ pub use ffmpeg::FfmpegBackend;
 pub use frame::{MAX_FRAME_EDGE, VideoFrame, clamp_frame};
 pub use info::{AudioInfo, MediaInfo, VideoInfo};
 pub use locate::FFMPEG_DIR_ENV;
+pub use version::FfmpegVersion;
 
 /// Everything MicroCut needs from a media library. Implementations must be usable from worker
 /// threads and must never panic on bad input.

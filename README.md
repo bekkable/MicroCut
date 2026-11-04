@@ -35,13 +35,13 @@ at the cursor. See
 
 Download the archive for your system from the [releases page](https://github.com/Najoko/MicroCut/releases),
 unpack it and start `microcut.exe` (Windows), `MicroCut.app` (macOS, Apple Silicon and Intel) or `microcut` (Linux).
-MicroCut needs [FFmpeg](https://ffmpeg.org) 5.1 or newer, which is not included:
+MicroCut needs [FFmpeg](https://ffmpeg.org) 4.4 or newer, which is not included:
 
 | System  | Install FFmpeg                                                                          |
 | ------- | --------------------------------------------------------------------------------------- |
 | Windows | `winget install Gyan.FFmpeg`                                                            |
 | macOS   | `brew install ffmpeg`                                                                   |
-| Linux   | your package manager, e.g. `sudo apt install ffmpeg` (Ubuntu 24.04+, Debian 12+)        |
+| Linux   | your package manager, e.g. `sudo apt install ffmpeg` (Ubuntu 22.04+, Debian 12+)        |
 
 The downloads are not signed. Windows SmartScreen may warn once: "More info" → "Run anyway". macOS blocks the first
 start: open System Settings → Privacy & Security and click "Open Anyway" (or run
