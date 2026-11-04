@@ -103,6 +103,8 @@ FFmpeg is not shipped: users install it themselves (see `NOTICE`).
   `-vsync passthrough` instead of `-fps_mode passthrough`, and the export counts frames with `trim` instead of
   `-frames:v` (which drops the audio track before FFmpeg 5), so FFmpeg 4.4 (Ubuntu 22.04) works; before 4.4 a clear
   error says to install a newer FFmpeg. CI also runs the gates on Ubuntu 22.04 with its FFmpeg 4.4
+- [ ] M6.5 Build provenance: the release workflow attests the archives (`actions/attest`, Sigstore, no key of our
+  own); `gh attestation verify <archive> -R Najoko/MicroCut` checks a download. Ticked after the first release
 
 ## Later
 

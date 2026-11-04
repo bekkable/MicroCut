@@ -134,4 +134,6 @@ GitHub Actions: `.github/workflows/ci.yml` runs `cargo xtask ci` on Windows, mac
 Ubuntu 24.04 with FFmpeg installed (pushes to `main`, pull requests). `.github/workflows/release.yml` runs on a tag
 `v<version>`: it checks the tag against the version in `Cargo.toml`, runs the CI workflow, builds the three archives
 (Linux on Ubuntu 22.04 for an older glibc) and creates a draft release with them and `SHA256SUMS.txt`, to be published
-by hand.
+by hand. The archives are not signed with a Windows or Apple certificate (macOS gets only the ad-hoc signature it needs
+to start); instead the workflow attests their build provenance (`actions/attest`: a Sigstore certificate for the
+workflow's OIDC identity, no key of our own), which `gh attestation verify <archive> -R Najoko/MicroCut` checks.

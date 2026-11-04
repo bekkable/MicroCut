@@ -64,6 +64,10 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      # Build provenance (Sigstore, no key of our own): an OIDC token to sign, and storage for the attestation.
+      id-token: write
+      attestations: write
+      artifact-metadata: write
     steps:
       - uses: actions/download-artifact@v8
         with:
@@ -74,6 +78,13 @@ jobs:
       - name: Checksums
         working-directory: dist
         run: sha256sum * > SHA256SUMS.txt
+
+      # Signed statement that these archives were built by this workflow from this commit; anyone can check a
+      # download with `gh attestation verify <file> -R <owner>/MicroCut`.
+      - name: Attest build provenance
+        uses: actions/attest@v4
+        with:
+          subject-path: dist/microcut-*
 
       - name: Create the draft
         env:

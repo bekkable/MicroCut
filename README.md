@@ -43,8 +43,11 @@ MicroCut needs [FFmpeg](https://ffmpeg.org) 4.4 or newer, which is not included:
 | macOS   | `brew install ffmpeg`                                                                   |
 | Linux   | your package manager, e.g. `sudo apt install ffmpeg` (Ubuntu 22.04+, Debian 12+)        |
 
-The downloads are not signed. Windows SmartScreen may warn once: "More info" → "Run anyway". macOS blocks the first
-start: open System Settings → Privacy & Security and click "Open Anyway" (or run
+To check that a download was built by this repository's release workflow (and not changed since), run
+`gh attestation verify <archive> -R Najoko/MicroCut` ([GitHub CLI](https://cli.github.com)).
+
+The downloads are not signed with a Windows or Apple certificate. Windows SmartScreen may warn once: "More info" → "Run
+anyway". macOS blocks the first start: open System Settings → Privacy & Security and click "Open Anyway" (or run
 `xattr -dr com.apple.quarantine MicroCut.app`).
 
 ## Build and run
