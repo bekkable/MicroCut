@@ -22,7 +22,7 @@ at the cursor. See
 | Double-click the time scale or scrollbar | Show the whole clip                          |
 | `I` / `O`, "Set start" / "Set end"     | Start / end the range at the cursor            |
 | ←/→ or A/D                             | One frame (keys pause playback)                |
-| ↑/↓ or W/S (or Shift+←/→), Page Up/Down | One second, ten seconds                       |
+| ↑/↓ or W/S (or Shift+←/→), Page Up/Down | To the next/previous whole second, whole ten seconds |
 | Home/End                               | Start/end of the range                         |
 | Ctrl+Home/End                          | First/last frame of the clip                   |
 | Speaker / wedge / wheel (status line)  | Mute, set volume                               |

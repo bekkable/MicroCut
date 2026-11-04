@@ -110,6 +110,17 @@ FFmpeg is not shipped: users install it themselves (see `NOTICE`).
   `release.yml` again; the first run also tests the untried macOS part of `cargo xtask dist` (`lipo`, `codesign`,
   icns, `ditto`)
 
+## M7 — Polish
+
+- [ ] M7.1 "About MicroCut" dialog
+- [x] M7.2 Second jumps are absolute: ↑/↓, W/S, Shift+←/→ go to the next/previous whole second since the start of
+  the clip (4:45.234 → 4:46.000, not 4:46.234), Page Up/Down to the next/previous whole ten seconds; a multiple that
+  falls between frames goes to the nearer frame boundary, and every jump moves at least one frame
+- [ ] M7.3 Drag the cursor: near the cursor line the pointer becomes a horizontal-move cursor, and a drag moves the
+  cursor instead of the view
+- [ ] M7.4 Frame buffer while paused: the frames around the cursor are decoded in the background, so stepping
+  frame by frame shows them at once
+
 ## Later
 
 - Remember window size and last folder

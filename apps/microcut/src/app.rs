@@ -688,7 +688,8 @@ fn play_button(ui: &mut egui::Ui, playing: bool) -> egui::Response {
 enum Jump {
     /// By this many frames (negative: back).
     Frames(i64),
-    /// By this many seconds (rounded to whole frames).
+    /// To the next (positive) or previous (negative) whole multiple of this many seconds since
+    /// the start of the clip — absolute, so 4:45.234 goes to 4:46.000, not 4:46.234.
     Seconds(i64),
     /// First frame of the range.
     RangeStart,
@@ -731,14 +732,14 @@ struct Landmarks {
     /// First and last frame of the range.
     range: (i64, i64),
     last: i64,
-    frames_per_second: i64,
+    rate: FrameRate,
 }
 
 /// The frame `jump` leads to from `cursor` (clamping to the clip is the session's job).
 fn jump_target(jump: Jump, cursor: i64, marks: &Landmarks) -> i64 {
     match jump {
         Jump::Frames(n) => cursor.saturating_add(n),
-        Jump::Seconds(n) => cursor.saturating_add(n.saturating_mul(marks.frames_per_second)),
+        Jump::Seconds(n) => seconds_grid_step(marks.rate, cursor, n),
         Jump::RangeStart => marks.range.0,
         Jump::RangeEnd => marks.range.1,
         Jump::First => 0,
@@ -746,8 +747,40 @@ fn jump_target(jump: Jump, cursor: i64, marks: &Landmarks) -> i64 {
     }
 }
 
-/// ←/→ (A/D) one frame, ↑/↓ (W/S, Shift+←/→) one second, Page Up/Down ten seconds, Home/End
-/// start/end of the range, Ctrl+Home/End first/last frame; the timeline scrolls along. +/− zoom.
+/// The frame of the next (`step` > 0) or previous (`step` < 0) whole multiple of `|step|`
+/// seconds, counted from the start of the clip, as seen from frame `cursor`. A multiple that
+/// falls between two frames goes to the nearer frame boundary (NTSC: 1 s → frame 30, which
+/// starts at 1.001 s), and the target is always a different frame than `cursor`.
+fn seconds_grid_step(rate: FrameRate, cursor: i64, step: i64) -> i64 {
+    let (num, den) = (i128::from(rate.num()), i128::from(rate.den()));
+    let secs = i128::from(step.unsigned_abs().max(1));
+    // Frame nearest to k · secs seconds: k · secs · num / den, rounded.
+    let grid_frame = |k: i128| {
+        let scaled = k.saturating_mul(secs).saturating_mul(num);
+        // ⌊scaled / den + ½⌋ = ⌊(2 · scaled + den) / (2 · den)⌋, exact for odd `den` too.
+        let frame = scaled
+            .saturating_mul(2)
+            .saturating_add(den)
+            .div_euclid(den.saturating_mul(2).max(1));
+        i64::try_from(frame).unwrap_or(if frame < 0 { i64::MIN } else { i64::MAX })
+    };
+    // With x = k · secs · num / den, grid_frame(k) = ⌊x + ½⌋. So grid_frame(k) > cursor exactly
+    // when x ≥ cursor + ½, and grid_frame(k) < cursor exactly when x < cursor − ½:
+    // k ≥ (2·cursor + 1) · den / (2 · secs · num), and k < (2·cursor − 1) · den / (2 · secs · num).
+    let divisor = num.saturating_mul(secs).saturating_mul(2).max(1);
+    let ceil_div = |a: i128| a.saturating_neg().div_euclid(divisor).saturating_neg();
+    let twice = i128::from(cursor).saturating_mul(2);
+    let k = if step > 0 {
+        ceil_div(twice.saturating_add(1).saturating_mul(den))
+    } else {
+        ceil_div(twice.saturating_sub(1).saturating_mul(den)).saturating_sub(1)
+    };
+    grid_frame(k)
+}
+
+/// ←/→ (A/D) one frame, ↑/↓ (W/S, Shift+←/→) to the next/previous whole second, Page Up/Down to
+/// the next/previous whole ten seconds, Home/End start/end of the range, Ctrl+Home/End
+/// first/last frame; the timeline scrolls along. +/− zoom.
 /// Only when no text field or other widget has the keyboard. Returns whether the cursor was moved.
 fn cursor_keys(ui: &mut egui::Ui, session: &mut Session) -> bool {
     if ui.memory(|m| m.focused().is_some()) {
@@ -756,7 +789,7 @@ fn cursor_keys(ui: &mut egui::Ui, session: &mut Session) -> bool {
     let marks = Landmarks {
         range: (session.range().start(), session.range().end()),
         last: session.last_frame(),
-        frames_per_second: frames_per_second(session.frame_rate()),
+        rate: session.frame_rate(),
     };
     let cursor = session.cursor();
     let jump = ui.input_mut(|i| {
@@ -803,12 +836,6 @@ fn mark_keys(ui: &mut egui::Ui, session: &mut Session) {
     if end {
         session.mark_end();
     }
-}
-
-/// Frames in one second, rounded (at least 1).
-fn frames_per_second(rate: FrameRate) -> i64 {
-    let (num, den) = (i64::from(rate.num()), i64::from(rate.den()));
-    ((num + den / 2) / den).max(1)
 }
 
 /// `h264 1280×720 · 60 fps · aac 48 kHz stereo · 00:08:55.300`, describing the selected audio
@@ -883,12 +910,13 @@ mod tests {
         let marks = Landmarks {
             range: (300, 2000),
             last: 5000,
-            frames_per_second: 60,
+            rate: FrameRate::new(60, 1).unwrap(),
         };
         let target = |jump| jump_target(jump, 1000, &marks);
         assert_eq!(target(Jump::Frames(-1)), 999);
-        assert_eq!(target(Jump::Seconds(1)), 1060);
-        assert_eq!(target(Jump::Seconds(-10)), 400);
+        // 1000 frames = 16.667 s: to 17 s and 10 s (absolute, not ±1 s / ±10 s).
+        assert_eq!(target(Jump::Seconds(1)), 1020);
+        assert_eq!(target(Jump::Seconds(-10)), 600);
         assert_eq!(target(Jump::RangeStart), 300);
         assert_eq!(target(Jump::RangeEnd), 2000);
         assert_eq!(target(Jump::First), 0);
@@ -900,6 +928,48 @@ mod tests {
     }
 
     #[test]
+    fn second_jumps_land_on_whole_seconds() {
+        let rate = FrameRate::new(60, 1).unwrap();
+        // 4:45.234 (frame 17114) → 4:46.000 → 4:47.000; back: 4:45.000 → 4:44.000.
+        let mut frame = 17_114;
+        let mut forward = Vec::new();
+        for _ in 0..2 {
+            frame = seconds_grid_step(rate, frame, 1);
+            forward.push(frame);
+        }
+        assert_eq!(forward, [17_160, 17_220]);
+        assert_eq!(seconds_grid_step(rate, 17_114, -1), 17_100);
+        assert_eq!(seconds_grid_step(rate, 17_100, -1), 17_040);
+        // Ten seconds: to the next/previous whole ten.
+        assert_eq!(seconds_grid_step(rate, 17_114, 10), 17_400);
+        assert_eq!(seconds_grid_step(rate, 17_114, -10), 16_800);
+        assert_eq!(seconds_grid_step(rate, 16_800, -10), 16_200);
+        // Before the start: frame 0 (the session clamps anyway).
+        assert_eq!(seconds_grid_step(rate, 10, -1), 0);
+        assert_eq!(seconds_grid_step(rate, 0, -1), -60);
+    }
+
+    #[test]
+    fn second_jumps_with_ntsc_rates_never_stand_still() {
+        let rate = FrameRate::new(30_000, 1_001).unwrap();
+        // 1 s = 29.97 frames → frame 30 (1.001 s); from there on to 2 s (59.94 → 60).
+        assert_eq!(seconds_grid_step(rate, 0, 1), 30);
+        assert_eq!(seconds_grid_step(rate, 29, 1), 30);
+        assert_eq!(seconds_grid_step(rate, 30, 1), 60);
+        assert_eq!(seconds_grid_step(rate, 30, -1), 0);
+        assert_eq!(seconds_grid_step(rate, 31, -1), 30);
+        // Every step moves, in both directions, across a long stretch.
+        for frame in 0..5_000 {
+            assert!(seconds_grid_step(rate, frame, 1) > frame, "{frame}");
+            assert!(seconds_grid_step(rate, frame, -1) < frame, "{frame}");
+        }
+        // Slow rates (one frame per 10 s): still moves.
+        let slow = FrameRate::new(1, 10).unwrap();
+        assert!(seconds_grid_step(slow, 5, 1) > 5);
+        assert!(seconds_grid_step(slow, 5, -1) < 5);
+    }
+
+    #[test]
     fn keys_are_bound_once() {
         for (n, (modifiers, key, _)) in NAVIGATION.iter().enumerate() {
             let twice = NAVIGATION
@@ -908,13 +978,5 @@ mod tests {
                 .any(|(m, k, _)| m == modifiers && k == key);
             assert!(!twice, "{modifiers:?} {key:?} bound twice");
         }
-    }
-
-    #[test]
-    fn one_second_in_frames() {
-        let fps = |n, d| frames_per_second(FrameRate::new(n, d).unwrap());
-        assert_eq!(fps(60, 1), 60);
-        assert_eq!(fps(30_000, 1_001), 30);
-        assert_eq!(fps(1, 10), 1);
     }
 }
