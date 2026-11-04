@@ -112,7 +112,9 @@ FFmpeg is not shipped: users install it themselves (see `NOTICE`).
 
 ## M7 — Polish
 
-- [ ] M7.1 "About MicroCut" dialog
+- [x] M7.1 "About MicroCut" dialog (About button, F1): icon, version, purpose, license, project page (opened through
+  the system, no extra dependency), the FFmpeg in use with its version (read on a worker thread) and path, and that
+  FFmpeg keeps its own license
 - [x] M7.2 Second jumps are absolute: ↑/↓, W/S, Shift+←/→ go to the next/previous whole second since the start of
   the clip (4:45.234 → 4:46.000, not 4:46.234), Page Up/Down to the next/previous whole ten seconds; a multiple that
   falls between frames goes to the nearer frame boundary, and every jump moves at least one frame

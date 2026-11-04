@@ -8,6 +8,7 @@ use microcut_engine::{RangeEnd, Session};
 use microcut_media::{Encoders, FfmpegBackend, MediaBackend, MediaInfo};
 use microcut_time::{ClockStamp, FrameRate};
 
+use crate::about::AboutDialog;
 use crate::export::{Choices, ExportDialog, Outcome};
 use crate::loader::ProbeJob;
 use crate::playback::{Playback, Step, stop_frame};
@@ -51,6 +52,10 @@ enum Document {
 pub struct MicroCutApp {
     /// The media backend, or why it is unavailable (shown permanently).
     backend: Result<Arc<dyn MediaBackend>, String>,
+    /// The same backend as FFmpeg (path and version for the About dialog).
+    ffmpeg: Result<Arc<FfmpegBackend>, String>,
+    /// The open About dialog.
+    about: Option<AboutDialog>,
     preview: Option<Preview>,
     thumbs: Option<Thumbnails>,
     timeline: Timeline,
@@ -98,9 +103,13 @@ impl MicroCutApp {
         storage: Option<&dyn eframe::Storage>,
         initial: Option<PathBuf>,
     ) -> MicroCutApp {
-        let backend = FfmpegBackend::locate()
-            .map(|b| Arc::new(b) as Arc<dyn MediaBackend>)
+        let ffmpeg = FfmpegBackend::locate()
+            .map(Arc::new)
             .map_err(|err| err.to_string());
+        let backend = ffmpeg
+            .as_ref()
+            .map(|b| Arc::clone(b) as Arc<dyn MediaBackend>)
+            .map_err(Clone::clone);
         let preview = backend
             .as_ref()
             .ok()
@@ -108,6 +117,8 @@ impl MicroCutApp {
         let thumbs = backend.as_ref().ok().map(|b| Thumbnails::new(b, ctx));
         let mut app = MicroCutApp {
             backend,
+            ffmpeg,
+            about: None,
             preview,
             thumbs,
             timeline: Timeline::default(),
@@ -240,9 +251,18 @@ impl MicroCutApp {
         }
     }
 
+    fn open_about(&mut self) {
+        let ffmpeg = self.ffmpeg.as_ref().map_err(String::as_str);
+        self.about = Some(AboutDialog::new(&self.ctx, ffmpeg));
+    }
+
     fn handle_input(&mut self, ui: &mut egui::Ui) {
-        if self.exports.dialog.is_some() {
+        if self.exports.dialog.is_some() || self.about.is_some() {
             // The dialog has the keyboard; files dropped meanwhile are ignored.
+            return;
+        }
+        if ui.input_mut(|i| i.consume_key(NONE, Key::F1)) {
+            self.open_about();
             return;
         }
         let free_keyboard = ui.memory(|m| m.focused().is_none());
@@ -413,6 +433,13 @@ impl MicroCutApp {
                 export.surrender_focus();
                 self.open_export();
             }
+            let about = ui
+                .button("About")
+                .on_hover_text("Version, license and the FFmpeg in use (F1)");
+            if about.clicked() {
+                about.surrender_focus();
+                self.open_about();
+            }
             let summary = match &self.document {
                 Document::Loaded(session) => {
                     Some(media_summary(session.media(), session.audio_track()))
@@ -535,6 +562,11 @@ impl eframe::App for MicroCutApp {
         }
         let ctx = self.ctx.clone();
         self.export_dialog(&ctx);
+        if let Some(about) = &mut self.about
+            && !about.show(&ctx)
+        {
+            self.about = None;
+        }
     }
 }
 

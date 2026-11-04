@@ -30,6 +30,7 @@ at the cursor. See
 | `[0] [1] …` left of the speaker        | Choose the audio track (videos with several)   |
 | Sync `◀ [+0 ms] ▶` left of the tracks  | Audio sync: type ± milliseconds (+ = sound later) or ±50 ms per arrow; for playback and export |
 | Ctrl+O                                 | Open a video                                   |
+| About, F1                              | About MicroCut: version, license, the FFmpeg in use |
 | Export…, E, Ctrl+E                     | Export the range (codecs, quality, audio track, file name; optionally on an NVIDIA graphics card) |
 
 ## Install

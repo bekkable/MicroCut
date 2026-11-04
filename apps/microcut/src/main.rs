@@ -3,6 +3,7 @@
 #![forbid(unsafe_code)]
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod about;
 mod app;
 mod audio;
 mod crash;
@@ -21,7 +22,7 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 /// The app icon (`assets/make_icon.py` draws it).
-const ICON_PNG: &[u8] = include_bytes!("../assets/icon.png");
+pub(crate) const ICON_PNG: &[u8] = include_bytes!("../assets/icon.png");
 
 fn main() -> ExitCode {
     crash::install_panic_hook();

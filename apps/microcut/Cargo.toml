@@ -4,6 +4,7 @@ description = "MicroCut: a minimal tool to trim a video to a start and end point
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+repository.workspace = true
 rust-version.workspace = true
 
 [dependencies]
