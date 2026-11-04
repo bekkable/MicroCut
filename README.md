@@ -16,6 +16,7 @@ at the cursor. See
 | Mouse wheel / `+` `−`                  | Zoom the timeline (at the pointer / cursor)    |
 | Drag the timeline or its scrollbar, Shift+wheel | Scroll the timeline                   |
 | Click on the timeline                  | Move the cursor                                |
+| Drag near the cursor line (↔ pointer)  | Move the cursor (Shift: to the nearest mark of the time scale) |
 | Drag a range handle (frame scale)      | Move the start or end of the range (Shift: snap to the time scale) |
 | Click a range handle                   | Cursor to that end of the range                |
 | Click / drag an edge arrow (frame scale) | Bring a range end that is out of view to the edge of the view / take hold of it |

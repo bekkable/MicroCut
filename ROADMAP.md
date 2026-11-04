@@ -116,8 +116,10 @@ FFmpeg is not shipped: users install it themselves (see `NOTICE`).
 - [x] M7.2 Second jumps are absolute: ↑/↓, W/S, Shift+←/→ go to the next/previous whole second since the start of
   the clip (4:45.234 → 4:46.000, not 4:46.234), Page Up/Down to the next/previous whole ten seconds; a multiple that
   falls between frames goes to the nearer frame boundary, and every jump moves at least one frame
-- [ ] M7.3 Drag the cursor: near the cursor line the pointer becomes a horizontal-move cursor, and a drag moves the
-  cursor instead of the view
+- [x] M7.3 Drag the cursor: near the cursor line (±6 points, or inside its frame at deep zoom) on the scales and the
+  strip the pointer becomes a horizontal-move cursor, and a drag moves the cursor instead of the view (Shift: to the
+  frame at the nearest mark; past the ends the view scrolls; range handles win on the frame scale; playback pauses
+  during the drag and continues from the new place)
 - [ ] M7.4 Frame buffer while paused: the frames around the cursor are decoded in the background, so stepping
   frame by frame shows them at once
 

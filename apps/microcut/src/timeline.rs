@@ -3,7 +3,8 @@
 //! which part of the clip is visible. One cursor line runs through the scales and the strip.
 //!
 //! Mouse: wheel zooms around the pointer, Shift+wheel (or a horizontal wheel/touchpad) scrolls,
-//! dragging the strip or a scale moves the view, a click sets the cursor, dragging a range
+//! dragging the strip or a scale moves the view, a click sets the cursor, dragging near the
+//! cursor line moves the cursor (Shift: to the frame at the nearest mark), dragging a range
 //! handle on the frame scale moves that end of the range (Shift: snapped to the time scale's
 //! marks), an arrow at the edge of the frame scale (shown when a range end is scrolled out of
 //! view) brings that end to the edge of the view on a click and takes hold of it on a drag, the
@@ -29,6 +30,8 @@ const LABEL_FONT_SIZE: f32 = 10.5;
 
 /// How close (points) the pointer must be to a range handle to grab it.
 const HANDLE_GRAB: f64 = 7.0;
+/// How close (points) the pointer must be to the cursor line to grab it.
+const CURSOR_GRAB: f64 = 6.0;
 /// Width of the arrows for range ends out of view.
 const ARROW_WIDTH: f32 = 18.0;
 /// Narrowest scrollbar thumb (points), so it stays grabbable at deep zoom.
@@ -49,6 +52,8 @@ enum Drag {
     Pan,
     RangeStart,
     RangeEnd,
+    /// The cursor (grabbed near its line).
+    Cursor,
     /// The scrollbar thumb; `grab` is the pointer's distance (in frames) from the left edge of
     /// the view.
     Scrollbar {
@@ -149,7 +154,7 @@ impl Timeline {
                     }
                 };
                 response.clone().on_hover_text(text);
-            } else if handle_at(rows, hover, session).is_some() {
+            } else if handle_at(rows, hover, session).is_some() || cursor_at(rows, hover, session) {
                 ui.ctx().set_cursor_icon(CursorIcon::ResizeHorizontal);
             }
         }
@@ -197,11 +202,53 @@ fn drag_kind(rows: &Rows, origin: Pos2, session: &Session) -> Drag {
         };
         return Drag::Scrollbar { grab };
     }
-    // Dragging an arrow takes hold of the range end it stands for.
+    // Dragging an arrow takes hold of the range end it stands for; range handles come before
+    // the cursor (which often stands on one).
     match arrow_at(rows, origin, session) {
         Some((_, RangeEnd::Start)) => Drag::RangeStart,
         Some((_, RangeEnd::End)) => Drag::RangeEnd,
-        None => handle_at(rows, origin, session).unwrap_or(Drag::Pan),
+        None => handle_at(rows, origin, session).unwrap_or_else(|| {
+            if cursor_at(rows, origin, session) {
+                Drag::Cursor
+            } else {
+                Drag::Pan
+            }
+        }),
+    }
+}
+
+/// The pointer's x in the view while dragging something along the timeline: past either end
+/// the view scrolls, faster the further out the pointer is; the result stays inside the view.
+fn drag_x(ui: &egui::Ui, pos: Pos2, rows: &Rows, session: &mut Session) -> f64 {
+    let width = f64::from(rows.frames.width());
+    let x = f64::from(pos.x - rows.frames.left());
+    let outside = if x < 0.0 {
+        x
+    } else if x > width {
+        x - width
+    } else {
+        0.0
+    };
+    if outside != 0.0 {
+        session.view_mut().pan(outside * 0.25);
+        ui.ctx().request_repaint();
+    }
+    x.clamp(0.0, width)
+}
+
+/// The frame boundary at view x `x`; with Shift snapped to the marks of the time scale
+/// (seconds etc., depending on zoom; absolute, counted from the start of the clip).
+fn boundary_at(ui: &egui::Ui, x: f64, session: &Session) -> i64 {
+    let view = session.view();
+    if ui.input(|i| i.modifiers.shift) {
+        snap_boundary(
+            view,
+            session.frame_rate(),
+            MIN_LABEL_SPACING,
+            view.pos_at(x),
+        )
+    } else {
+        view.boundary_at(x)
     }
 }
 
@@ -213,7 +260,6 @@ fn apply_drag(
     rows: &Rows,
     session: &mut Session,
 ) {
-    let width = f64::from(rows.frames.width());
     match drag {
         Drag::Pan => {
             ui.ctx().set_cursor_icon(CursorIcon::Grabbing);
@@ -223,30 +269,21 @@ fn apply_drag(
             let pos = scrollbar_pos(rows, pos.x, session.view().end());
             session.view_mut().set_left(pos - grab);
         }
+        Drag::Cursor => {
+            ui.ctx().set_cursor_icon(CursorIcon::ResizeHorizontal);
+            let x = drag_x(ui, pos, rows, session);
+            // The frame under the pointer; with Shift the frame starting at the nearest mark.
+            let frame = if ui.input(|i| i.modifiers.shift) {
+                boundary_at(ui, x, session)
+            } else {
+                session.view().frame_at(x)
+            };
+            session.set_cursor(frame);
+        }
         Drag::RangeStart | Drag::RangeEnd => {
             ui.ctx().set_cursor_icon(CursorIcon::ResizeHorizontal);
-            // Dragging past either end scrolls, faster the further out the pointer is.
-            let x = f64::from(pos.x - rows.frames.left());
-            let outside = if x < 0.0 {
-                x
-            } else if x > width {
-                x - width
-            } else {
-                0.0
-            };
-            if outside != 0.0 {
-                session.view_mut().pan(outside * 0.25);
-                ui.ctx().request_repaint();
-            }
-            let x = x.clamp(0.0, width);
-            // Shift snaps to the marks of the time scale (seconds etc., depending on zoom).
-            let boundary = if ui.input(|i| i.modifiers.shift) {
-                let view = session.view();
-                let pos = view.pos_at(x);
-                snap_boundary(view, session.frame_rate(), MIN_LABEL_SPACING, pos)
-            } else {
-                session.view().boundary_at(x)
-            };
+            let x = drag_x(ui, pos, rows, session);
+            let boundary = boundary_at(ui, x, session);
             // The preview follows the handle.
             if drag == Drag::RangeStart {
                 let start = session.set_range_start(boundary);
@@ -275,7 +312,7 @@ fn click(rows: &Rows, pos: Pos2, session: &mut Session) {
         match handle {
             Drag::RangeStart => session.set_cursor(range.start()),
             Drag::RangeEnd => session.set_cursor(range.end()),
-            Drag::Pan | Drag::Scrollbar { .. } => {}
+            Drag::Pan | Drag::Cursor | Drag::Scrollbar { .. } => {}
         }
     } else {
         let x = f64::from(pos.x - rows.frames.left());
@@ -347,6 +384,23 @@ fn handle_at(rows: &Rows, pos: Pos2, session: &Session) -> Option<Drag> {
     } else {
         Some(Drag::RangeEnd)
     }
+}
+
+/// Whether `pos` is on the cursor: on the scales or the strip, near the cursor line or (deep
+/// zoom) inside the frame it marks.
+fn cursor_at(rows: &Rows, pos: Pos2, session: &Session) -> bool {
+    if !rows.content().contains(pos) {
+        return false;
+    }
+    let view = session.view();
+    let cursor = session.cursor() as f64;
+    let x = f64::from(pos.x - rows.frames.left());
+    near_cursor(x, view.x_of(cursor), view.x_of(cursor + 1.0))
+}
+
+/// Whether view x `x` grabs a cursor whose frame spans `left..right` (view x).
+fn near_cursor(x: f64, left: f64, right: f64) -> bool {
+    (x - left).abs() <= CURSOR_GRAB || (left..=right).contains(&x)
 }
 
 /// Screen x for a view x, kept within a sane distance of the timeline (huge coordinates upset
@@ -675,6 +729,19 @@ mod tests {
         let uv = cover_uv(0.5 * 16.0 / 9.0, 16.0 / 9.0);
         let expected = Rect::from_min_max(Pos2::ZERO, Pos2::new(0.5, 1.0));
         assert!(close(uv, expected), "{uv:?}");
+    }
+
+    #[test]
+    fn the_cursor_is_grabbed_near_its_line_or_inside_its_frame() {
+        // Zoomed out: the frame is a fraction of a point wide; ±6 points around the line.
+        assert!(near_cursor(100.0, 100.0, 100.2));
+        assert!(near_cursor(94.0, 100.0, 100.2));
+        assert!(near_cursor(106.0, 100.0, 100.2));
+        assert!(!near_cursor(106.5, 100.0, 100.2));
+        assert!(!near_cursor(93.0, 100.0, 100.2));
+        // Deep zoom: anywhere on the marked frame too.
+        assert!(near_cursor(150.0, 100.0, 180.0));
+        assert!(!near_cursor(181.0, 100.0, 180.0));
     }
 
     #[test]
