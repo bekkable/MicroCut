@@ -1,0 +1,54 @@
+# Quality gates (`cargo xtask ci`) on Windows, macOS and Linux, with FFmpeg installed so the integration tests run
+# instead of skipping. Also called by release.yml before anything is built.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  gates:
+    name: Gates (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        # Linux: 24.04, because MicroCut needs FFmpeg 5.1 or newer (22.04 packages 4.4).
+        os: [windows-latest, macos-latest, ubuntu-24.04]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: System packages and FFmpeg (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libasound2-dev libgtk-3-dev ffmpeg
+
+      - name: FFmpeg (macOS)
+        if: runner.os == 'macOS'
+        run: brew install ffmpeg
+
+      - name: FFmpeg (Windows)
+        if: runner.os == 'Windows'
+        run: choco install ffmpeg --no-progress -y
+
+      - name: FFmpeg version
+        shell: bash
+        run: ffmpeg -hide_banner -version | head -n 1
+
+      - run: cargo xtask ci

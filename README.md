@@ -35,13 +35,13 @@ at the cursor. See
 
 Download the archive for your system from the [releases page](https://github.com/Najoko/MicroCut/releases),
 unpack it and start `microcut.exe` (Windows), `MicroCut.app` (macOS, Apple Silicon and Intel) or `microcut` (Linux).
-MicroCut needs [FFmpeg](https://ffmpeg.org), which is not included:
+MicroCut needs [FFmpeg](https://ffmpeg.org) 5.1 or newer, which is not included:
 
-| System  | Install FFmpeg                                         |
-| ------- | ------------------------------------------------------ |
-| Windows | `winget install Gyan.FFmpeg`                            |
-| macOS   | `brew install ffmpeg`                                  |
-| Linux   | your package manager, e.g. `sudo apt install ffmpeg`   |
+| System  | Install FFmpeg                                                                          |
+| ------- | --------------------------------------------------------------------------------------- |
+| Windows | `winget install Gyan.FFmpeg`                                                            |
+| macOS   | `brew install ffmpeg`                                                                   |
+| Linux   | your package manager, e.g. `sudo apt install ffmpeg` (Ubuntu 24.04+, Debian 12+)        |
 
 The downloads are not signed. Windows SmartScreen may warn once: "More info" → "Run anyway". macOS blocks the first
 start: open System Settings → Privacy & Security and click "Open Anyway" (or run
@@ -54,6 +54,10 @@ cargo run            # start the app
 cargo xtask ci       # fmt, clippy, tests
 cargo xtask dist     # release archive for this platform, in dist/
 ```
+
+Releases: set the version in `Cargo.toml`, commit, then push a tag `v<version>` (`git tag v0.1.0 && git push origin
+v0.1.0`). GitHub Actions runs the gates, builds the archives for Windows, macOS and Linux and opens a draft release
+with them; check it on the releases page and publish it.
 
 Needs Rust ≥ 1.95 to build and [FFmpeg](https://ffmpeg.org) (`ffmpeg` and `ffprobe`) to run: in `PATH`, next to the
 MicroCut executable, in the folder named by `MICROCUT_FFMPEG_DIR`, or (macOS) where Homebrew or MacPorts put it. On

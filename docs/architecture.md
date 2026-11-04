@@ -111,3 +111,8 @@ zip, macOS gets `MicroCut.app` (both architectures merged with `lipo`, `Info.pli
 `ditto`), Linux a `.tar.gz` (keeps the executable bit). FFmpeg is not included (`NOTICE`); an app started from the
 macOS Finder has a minimal `PATH`, so the backend also looks in the Homebrew and MacPorts folders
 (`crates/media/src/locate.rs`).
+
+GitHub Actions: `.github/workflows/ci.yml` runs `cargo xtask ci` on Windows, macOS and Ubuntu 24.04 with FFmpeg
+installed (pushes to `main`, pull requests). `.github/workflows/release.yml` runs on a tag `v<version>`: it checks the
+tag against the version in `Cargo.toml`, runs the CI workflow, builds the three archives (Linux on Ubuntu 22.04 for an
+older glibc) and creates a draft release with them and `SHA256SUMS.txt`, to be published by hand.
